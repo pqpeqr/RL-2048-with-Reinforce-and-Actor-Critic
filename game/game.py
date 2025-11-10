@@ -3,46 +3,47 @@ import secrets
 import copy
 from typing import Optional
 
+from logger import log_append
 
 
 Action = int    #0:up, 1: right, 2: down, 3: left
 
 
 class Game2048:
-    def __init__(self, size: int = 4, lg2: bool = False):
+    def __init__(self, 
+                 size: int = 4, 
+                 lg2: bool = False, 
+                 *, 
+                 log_file: str = "game2048.log", 
+                 record_reward: bool = False,   
+                 raise_on_noop: bool = False,
+                 noop_penalty: int = 1):
         self.size = size
         self.lg2 = lg2
+        self.log_file = log_file
+        # whether a new maximum merge record receives an additional reward
+        self.record_reward = record_reward
+        # whether raise error on a redundant step (or Deduct points)
+        self.raise_on_noop = raise_on_noop
+        self.noop_penalty = noop_penalty
+        
         self.board: list[list[int]] = [[0] * size for _ in range(self.size)]
         self.score: int = 0
-        self.rng = random.Random()
-        self.new_merged = []        # for counting gain in each move
-        # self.number_record = 0      # for score count
-
-    def set_seed(self, seed: Optional[int] = None):
-        # TODO: log seed
-        if seed is None:
-            seed = secrets.randbits(64)
-        self.rng.seed(seed)
-
+        self._rng = random.Random()
+        
+        self._new_merged: list[int] = []    # for counting gain in each move
+        self._merge_record: int = 0    # largest num merged for record reward
+    # ------pub---------
     def reset(self, seed: Optional[int] = None) -> list[list[int]]:
-        self.set_seed(seed)
+        self._log(f"------game reset------")
+        self._set_seed(seed)
         self.board = [[0] * self.size for _ in range(self.size)]
         self.score = 0
-        self.spawn()
-        self.spawn()
-        # self.number_record = 0
+        self._merge_record = 0
+        self._spawn()
+        self._spawn()
         return self.state()
-        
-    def spawn(self):
-        empties = [(r, c) for r in range(self.size) for c in range(self.size)
-                   if self.board[r][c] == 0]
-        if not empties:
-            # board is full, empties is []
-            return
-        r, c = self.rng.choice(empties)
-        #90% -> 2, 10% -> 4
-        self.board[r][c] = 2 if self.rng.random() < 0.9 else 4
-        
+    
     def state(self, lg2: Optional[bool] = None) -> list[list[int]]:
         if lg2 is None:
             lg2 = self.lg2
@@ -56,7 +57,89 @@ class Game2048:
         else:
             return copy.deepcopy(self.board)
     
-    def row_move_left(self, row: list[int]) -> list[int]:
+    def step(self, action:Action) -> tuple[list[list[int]], int, bool]:
+        """
+        return state, reward, is_done
+        """
+        if action not in (0, 1, 2, 3):
+            raise ValueError("invalid action")
+        self._new_merged = []
+
+        is_changed = self._move(action)
+        
+        if not is_changed and self.raise_on_noop:
+            self._log(f"action: {action}, changed=False -> raising due to raise_on_noop")
+            raise ValueError("action does not change the board")
+        
+        reward = self._count_reward(is_changed)
+        self.score += reward
+        if is_changed:
+            self._spawn()
+        self._log(
+            f"action: {action}, "
+            f"changed={is_changed}, "
+            f"reward={reward}, "
+            f"score={self.score}"
+        )
+        return self.state(), reward, self._is_done()
+
+    def render(self, lg2: Optional[bool] = None):
+        if lg2 is None:
+            lg2 = self.lg2
+        state = self.state(lg2)
+        width = max(4, 
+                    max((len(str(x)) for row in state for x in row), default=1))
+        sep = "+" + "+".join(["-" * (width)] * self.size) + "+"
+        lines = [sep]
+        for row in state:
+            lines.append(
+                "|" + 
+                "|".join(f"{x}".rjust(width) if x else " ".rjust(width) 
+                         for x in row) + 
+                "|"
+            )
+            lines.append(sep)
+        lines.append(f"Score: {self.score}")
+        print("\n".join(lines))
+    
+    def get_record(self, lg2: Optional[bool] = None) -> int:
+        if lg2 is None:
+            lg2 = self.lg2
+        v = self._merge_record
+        if not v:
+            return 0
+        return (v.bit_length() - 1) if lg2 else v
+
+    def get_action_mask(self) -> list[int]:
+        mask = []
+        for action in (0, 1, 2, 3):
+            mask.append(1 if self._can_change_with_action(action) else 0)
+        return mask
+
+    # ------priv---------
+    def _log(self, msg: str) -> None:
+        try:
+            log_append(msg, filepath=self.log_file)
+        except Exception:
+            pass
+    
+    def _set_seed(self, seed: Optional[int] = None):
+        if seed is None:
+            seed = secrets.randbits(64)
+        self._rng.seed(seed)
+        self._log(f"seed set: {seed}")
+    
+    def _spawn(self):
+        empties = [(r, c) for r in range(self.size) for c in range(self.size)
+                   if self.board[r][c] == 0]
+        if not empties:
+            # board is full, empties is []
+            return
+        r, c = self._rng.choice(empties)
+        #90% -> 2, 10% -> 4
+        self.board[r][c] = 2 if self._rng.random() < 0.9 else 4
+    
+    def _row_move_left(self, row: list[int]) -> list[int]:
         cells = [x for x in row if x != 0]
         new_row: list[int] = []
         i = 0
@@ -64,22 +147,21 @@ class Game2048:
             if i + 1 < len(cells) and cells[i] == cells[i + 1]:
                 val = cells[i] << 1
                 new_row.append(val)
-                self.new_merged.append(val)
+                self._new_merged.append(val)
                 i += 2
             else:
                 new_row.append(cells[i])
                 i += 1
         return new_row + [0] * (len(row) - len(new_row))   # pad 0
 
-        
-    def board_move_left(self) -> bool:
+    def _board_move_left(self) -> bool:
         """
         return board changed or not
         """
         is_changed = False
         new_board = []
         for row in self.board:
-            new_row = self.row_move_left(row)
+            new_row = self._row_move_left(row)
             new_board.append(new_row)
             if new_row != row:
                 is_changed = True
@@ -91,43 +173,35 @@ class Game2048:
         for _ in range(times):
             self.board = [list(row) for row in zip(*self.board[::-1])]
 
-    def move(self, action:Action) -> bool:
+    def _move(self, action:Action) -> bool:
         rotations = 3 - action        #{0:3, 1:2, 2:1, 3:0}
         self.rotate_clockwise(rotations)
-        is_changed = self.board_move_left()
+        is_changed = self._board_move_left()
         self.rotate_clockwise((4 - rotations) % 4)
         return is_changed
     
-    def step(self, action:Action) -> tuple[list[list[int]], int, bool]:
-        """
-        return state, reward, is_done
-        """
-        # TODO: log action
-        if action not in (0, 1, 2, 3):
-            raise ValueError("invalid action")
-        self.new_merged = []
-        is_changed = self.move(action)
-        reward = self.count_reward(is_changed)
-        self.score += reward
-        if is_changed:
-            self.spawn()
-        return self.state(), reward, self.is_done()
-            
-    def count_reward(self, is_changed: bool) -> int:
+    def _count_reward(self, is_changed: bool) -> int:
         # score for each merged cell
-        reward = sum(self.new_merged)
-        # # score for new biggest num
-        # if self.new_merged:
-        #     current_max = max(self.new_merged)
-        #     if current_max > self.number_record:
-        #         reward += current_max
-        #         self.number_record = current_max
-        # score mines for redundant step
-        if not is_changed:
-            reward -= 1
+        reward = sum(self._new_merged)
+        
+        # score for new biggest num
+        if self.record_reward and self._new_merged:
+            current_max = max(self._new_merged)
+            if current_max > self._merge_record:
+                reward += current_max
+                self._merge_record = current_max
+        else:
+            if self._new_merged:
+                current_max = max(self._new_merged)
+                if current_max > self._merge_record:
+                    self._merge_record = current_max
+        
+        # score mines for redundant step (if not in raise on noop mode)
+        if not is_changed and not self.raise_on_noop:
+            reward -= self.noop_penalty
         return reward
     
-    def is_done(self) -> bool:
+    def _is_done(self) -> bool:
         if any(0 in row for row in self.board):
             return False
         for r in range(self.size):
@@ -136,22 +210,73 @@ class Game2048:
                 if  (r + 1 < self.size and self.board[r+1][c] == v) or \
                     (c + 1 < self.size and self.board[r][c+1] == v):
                     return False
+        self._log("------game done------")
         return True
+    
+    @staticmethod
+    def _row_move_left_preview(row: list[int]) -> list[int]:
+        cells = [x for x in row if x != 0]
+        new_row: list[int] = []
+        i = 0
+        while i < len(cells):
+            if i + 1 < len(cells) and cells[i] == cells[i + 1]:
+                val = cells[i] << 1
+                new_row.append(val)
+                i += 2
+            else:
+                new_row.append(cells[i])
+                i += 1
+        return new_row + [0] * (len(row) - len(new_row))
+    
+    @staticmethod
+    def _board_move_left_preview(board: list[list[int]]) -> tuple[bool, list[list[int]]]:
+        is_changed = False
+        new_board: list[list[int]] = []
+        for row in board:
+            new_row = Game2048._row_move_left_preview(row)
+            new_board.append(new_row)
+            if new_row != row:
+                is_changed = True
+        return is_changed, new_board
+    
+    @staticmethod
+    def _rotate_clockwise_preview(board: list[list[int]], times: int) -> list[list[int]]:
+        times %= 4
+        b = [row[:] for row in board]       # "deep copy"
+        for _ in range(times):
+            b = [list(row) for row in zip(*b[::-1])]
+        return b
+        
+    def _can_change_with_action(self, action: Action) -> bool:
+        rotations = 3 - action
+        temp = self._rotate_clockwise_preview(self.board, rotations)
+        changed, _ = self._board_move_left_preview(temp)
+        return changed
 
-    def render(self, lg2: Optional[bool] = None):
-        if lg2 is None:
-            lg2 = self.lg2
-        state = self.state(lg2)
-        width = max(4, max((len(str(x)) for row in state for x in row), default=1))
-        sep = "+" + "+".join(["-" * (width)] * self.size) + "+"
-        lines = [sep]
-        for row in state:
-            lines.append("|" + "|".join(f"{x}".rjust(width) if x else " ".rjust(width) for x in row) + "|")
-            lines.append(sep)
-        lines.append(f"Score: {self.score}")
-        print("\n".join(lines))
-    
-    
-# TODO: log seed, action
-# TODO: max reward + Markovization + switch
-# TODO: action mask + switch
+
+
+
+
+if __name__ == "__main__":
+    game = Game2048(record_reward=True)
+    game.reset(1)
+    game.render()
+    game.step(0)
+    game.render()
+    game.step(1)
+    game.render()
+    game.step(1)
+    game.step(1)
+    game.step(1)
+    game.step(1)
+    game.step(1)
+    game.step(1)
+    game.step(1)
+    game.step(1)
+    game.step(1)
+    game.step(1)
+    game.step(1)
+    game.step(1)
+    game.render()
+    game.step(1)
+    game.render()
