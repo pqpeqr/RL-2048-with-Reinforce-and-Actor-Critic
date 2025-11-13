@@ -21,7 +21,7 @@ class Game2048:
         self._new_merged: list[int] = []    # for counting gain in each move
         
         # logging
-        self._logger = logging.getLogger(__name__)
+        self._logger = logging.getLogger(__name__+".Game2048")
         if not self._logger.handlers:
             self._logger.addHandler(logging.NullHandler())
     

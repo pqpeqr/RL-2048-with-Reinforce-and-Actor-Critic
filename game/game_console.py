@@ -1,4 +1,5 @@
 
+import logging
 from typing import Optional
 
 from game2048 import Game2048, Action
@@ -63,7 +64,19 @@ def main():
             print(game.render())
             print("GAME OVER")
             break
+        
+def log_setup():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler("game2048.log", encoding="utf-8"),
+        ],
+    )
+
+    logger = logging.getLogger(__name__)
 
 
 if __name__ == "__main__":
+    log_setup()
     main()
