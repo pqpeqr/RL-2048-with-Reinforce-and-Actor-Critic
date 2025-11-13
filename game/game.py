@@ -6,87 +6,62 @@ from typing import Optional
 from logger import log_append
 
 
-Action = int    #0:up, 1: right, 2: down, 3: left
+Action = int    # 0:up, 1: right, 2: down, 3: left
 
 
 class Game2048:
     def __init__(self, 
-                 size: int = 4, 
-                 lg2: bool = False, 
+                 size: int = 4,
                  *, 
-                 log_file: str = "game2048.log", 
-                 record_reward: bool = False,   
-                 raise_on_noop: bool = False,
-                 noop_penalty: int = 1):
+                 log_file: str = "game2048.log"):
         self.size = size
-        self.lg2 = lg2
         self.log_file = log_file
-        # whether a new maximum merge record receives an additional reward
-        self.record_reward = record_reward
-        # whether raise error on a redundant step (or Deduct points)
-        self.raise_on_noop = raise_on_noop
-        self.noop_penalty = noop_penalty
         
         self.board: list[list[int]] = [[0] * size for _ in range(self.size)]
         self.score: int = 0
         self._rng = random.Random()
         
         self._new_merged: list[int] = []    # for counting gain in each move
-        self._merge_record: int = 0    # largest num merged for record reward
+        
+
     # ------pub---------
     def reset(self, seed: Optional[int] = None) -> list[list[int]]:
         self._log(f"------game reset------")
         self._set_seed(seed)
         self.board = [[0] * self.size for _ in range(self.size)]
         self.score = 0
-        self._merge_record = 0
         self._spawn()
         self._spawn()
-        return self.state()
+        return self.state
     
-    def state(self, lg2: Optional[bool] = None) -> list[list[int]]:
-        if lg2 is None:
-            lg2 = self.lg2
-        if lg2:
-            state = [[0] * self.size for _ in range(self.size)]
-            for r in range(self.size):
-                for c in range(self.size):
-                    v = self.board[r][c]
-                    state[r][c] = 0 if v == 0 else v.bit_length() - 1
-            return state
-        else:
-            return copy.deepcopy(self.board)
+    @property
+    def state(self) -> list[list[int]]:
+        return copy.deepcopy(self.board)
     
-    def step(self, action:Action) -> tuple[list[list[int]], int, bool]:
+    def step(self, action:Action) -> tuple[bool, list[list[int]], list[int], bool]:
         """
-        return state, reward, is_done
+        return state, new_merged, is_done
         """
         if action not in (0, 1, 2, 3):
             raise ValueError("invalid action")
         self._new_merged = []
-
         is_changed = self._move(action)
+
+        step_score = self._count_step_score(is_changed)
+        self.score += step_score
         
-        if not is_changed and self.raise_on_noop:
-            self._log(f"action: {action}, changed=False -> raising due to raise_on_noop")
-            raise ValueError("action does not change the board")
-        
-        reward = self._count_reward(is_changed)
-        self.score += reward
         if is_changed:
             self._spawn()
         self._log(
             f"action: {action}, "
             f"changed={is_changed}, "
-            f"reward={reward}, "
+            f"step_score={step_score}, "
             f"score={self.score}"
         )
-        return self.state(), reward, self._is_done()
+        return is_changed, self.state, self._new_merged, self._is_done()
 
-    def render(self, lg2: Optional[bool] = None):
-        if lg2 is None:
-            lg2 = self.lg2
-        state = self.state(lg2)
+    def render(self):
+        state = self.state
         width = max(4, 
                     max((len(str(x)) for row in state for x in row), default=1))
         sep = "+" + "+".join(["-" * (width)] * self.size) + "+"
@@ -101,14 +76,6 @@ class Game2048:
             lines.append(sep)
         lines.append(f"Score: {self.score}")
         print("\n".join(lines))
-    
-    def get_record(self, lg2: Optional[bool] = None) -> int:
-        if lg2 is None:
-            lg2 = self.lg2
-        v = self._merge_record
-        if not v:
-            return 0
-        return (v.bit_length() - 1) if lg2 else v
 
     def get_action_mask(self) -> list[int]:
         mask = []
@@ -180,26 +147,10 @@ class Game2048:
         self.rotate_clockwise((4 - rotations) % 4)
         return is_changed
     
-    def _count_reward(self, is_changed: bool) -> int:
+    def _count_step_score(self) -> int:
         # score for each merged cell
-        reward = sum(self._new_merged)
-        
-        # score for new biggest num
-        if self.record_reward and self._new_merged:
-            current_max = max(self._new_merged)
-            if current_max > self._merge_record:
-                reward += current_max
-                self._merge_record = current_max
-        else:
-            if self._new_merged:
-                current_max = max(self._new_merged)
-                if current_max > self._merge_record:
-                    self._merge_record = current_max
-        
-        # score mines for redundant step (if not in raise on noop mode)
-        if not is_changed and not self.raise_on_noop:
-            reward -= self.noop_penalty
-        return reward
+        step_score = sum(self._new_merged)
+        return step_score
     
     def _is_done(self) -> bool:
         if any(0 in row for row in self.board):
@@ -252,31 +203,3 @@ class Game2048:
         temp = self._rotate_clockwise_preview(self.board, rotations)
         changed, _ = self._board_move_left_preview(temp)
         return changed
-
-
-
-
-
-if __name__ == "__main__":
-    game = Game2048(record_reward=True)
-    game.reset(1)
-    game.render()
-    game.step(0)
-    game.render()
-    game.step(1)
-    game.render()
-    game.step(1)
-    game.step(1)
-    game.step(1)
-    game.step(1)
-    game.step(1)
-    game.step(1)
-    game.step(1)
-    game.step(1)
-    game.step(1)
-    game.step(1)
-    game.step(1)
-    game.step(1)
-    game.render()
-    game.step(1)
-    game.render()
