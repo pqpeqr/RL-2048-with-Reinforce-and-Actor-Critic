@@ -25,7 +25,6 @@ class Game2048EnvConfig:
     use_action_mask: bool = True           # T / F
     invalid_action_penalty: float = -1.0   # penalty when not using action musk
     max_steps: int = None                  # max step in an episode
-    log_level: int = logging.INFO
     
 
 
@@ -48,7 +47,6 @@ class Game2048Env(gym.Env):
         self._logger = logging.getLogger(__name__ + ".Game2048Env")
         if not self._logger.handlers:
             self._logger.addHandler(logging.NullHandler())
-        self._logger.setLevel(self.config.log_level)
         
         logging.getLogger("game.game2048.Game2048").disabled = True      # mute Game's logger
 
@@ -149,8 +147,9 @@ class Game2048Env(gym.Env):
             "raw_state": state,
         }
 
-        self._logger.info("Env reset with seed=%s, initial_score=%s", seed, self.game.score)
-
+        self._logger.debug("Env reset with seed=%s, initial_score=%s", seed, self.game.score)        
+        self._logger.debug("BOARD STATE\n"+self.render(mode="ansi"))
+        
         return obs, info
     
     
@@ -231,7 +230,7 @@ class Game2048Env(gym.Env):
         }
 
         # logging
-        self._logger.info(
+        self._logger.debug(
             "step=%d, action=%d, changed=%s, merged=%s, reward=%.3f, score=%d, done=%s, truncated=%s",
             self._step_count,
             action,
@@ -242,6 +241,7 @@ class Game2048Env(gym.Env):
             terminated,
             truncated,
         )
+        self._logger.debug("BOARD STATE\n"+self.render(mode="ansi"))
 
         return obs, reward, terminated, truncated, info
 
