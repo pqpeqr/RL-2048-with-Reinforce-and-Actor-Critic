@@ -98,7 +98,7 @@ class Game2048Env(gym.Env):
     
     
     def _preprocess_board(self, board: np.ndarray) -> np.ndarray:
-        board = board.astype(np.float32)
+        board = board.astype(np.float32, copy=True)
 
         if self.config.obs_mode == "raw":
             return board
@@ -115,7 +115,8 @@ class Game2048Env(gym.Env):
     
     
     def _get_obs(self):
-        board = np.array(self.game.state, dtype=np.int64)
+        board = self.game.board
+        
         processed = self._preprocess_board(board)
 
         if self.config.use_action_mask:
