@@ -50,7 +50,7 @@ class Game2048Env(gym.Env):
             self._logger.addHandler(logging.NullHandler())
         self._logger.setLevel(self.config.log_level)
         
-        logging.getLogger("game2048.Game2048").disabled = True      # mute Game's logger
+        logging.getLogger("game.game2048.Game2048").disabled = True      # mute Game's logger
 
         # Gym spaces
         self.action_space = spaces.Discrete(4)  # 0: up, 1: right, 2: down, 3: left
