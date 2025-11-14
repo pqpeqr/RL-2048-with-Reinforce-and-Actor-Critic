@@ -1,10 +1,9 @@
 
 import logging
-from typing import Optional
 
 from game2048 import Game2048, Action
 
-def _action_from_input(s: str) -> Optional[Action]:
+def _action_from_input(s: str) -> Action | None:
     s = s.strip().lower()
     if not s:
         return None

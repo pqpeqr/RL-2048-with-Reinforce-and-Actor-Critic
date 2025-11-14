@@ -1,6 +1,5 @@
 import secrets
 import logging
-from typing import Optional
 
 
 
@@ -25,7 +24,7 @@ class Game2048:
         if not self._logger.handlers:
             self._logger.addHandler(logging.NullHandler())
     
-    def reset(self, seed: Optional[int] = None) -> list[list[int]]:
+    def reset(self, seed: int | None = None) -> list[list[int]]:
         self._log(f"------game reset------")
         self._set_seed(seed)
         self.board = np.zeros((self.size, self.size), dtype=np.int64)
@@ -96,7 +95,7 @@ class Game2048:
         except Exception:
             pass
         
-    def _set_seed(self, seed: Optional[int] = None):
+    def _set_seed(self, seed: int | None = None):
         if seed is None:
             seed = secrets.randbits(64)
         self._rng = np.random.default_rng(seed)
