@@ -61,7 +61,7 @@ class Game2048:
         )
         return is_changed, self.state, self._new_merged.copy(), self._is_done()
     
-    def render(self):
+    def render(self) -> str:
         state = self.state
         width = max(
             4,
@@ -101,7 +101,7 @@ class Game2048:
         self._rng = np.random.default_rng(seed)
         self._log(f"seed set: {seed}")
 
-    def _spawn(self):
+    def _spawn(self) -> None:
         empties = np.argwhere(self.board == 0)
         if empties.size == 0:
             return
@@ -146,7 +146,7 @@ class Game2048:
         self.board = new_board
         return is_changed
 
-    def rotate_clockwise(self, times: int):
+    def rotate_clockwise(self, times: int) -> None:
         times %= 4
         if times:
             self.board = np.rot90(self.board, k=-times)

@@ -33,7 +33,7 @@ class Game2048Env(gym.Env):
 
     metadata = {"render_modes": ["human", "ansi"]}
 
-    def __init__(self, config: Game2048EnvConfig | None = None):
+    def __init__(self, config: Game2048EnvConfig | None = None) -> None:
         super().__init__()
 
         self.config = config or Game2048EnvConfig()
@@ -114,7 +114,7 @@ class Game2048Env(gym.Env):
         return np.array(mask_list, dtype=np.int8)
     
     
-    def _get_obs(self):
+    def _get_obs(self) -> np.ndarray | dict[str, Any]:
         board = self.game.board
         
         processed = self._preprocess_board(board)
@@ -197,7 +197,7 @@ class Game2048Env(gym.Env):
         return reward
     
     
-    def step(self, action: int):
+    def step(self, action: int) -> tuple[np.ndarray | dict[str, Any], float, bool, bool, dict[str, Any]]:
         assert self.action_space.contains(action), f"Invalid action: {action}"
 
         self._step_count += 1
@@ -246,7 +246,7 @@ class Game2048Env(gym.Env):
         return obs, reward, terminated, truncated, info
 
 
-    def render(self, mode: str = "human"):
+    def render(self, mode: str = "human") -> str | None:
         text = self.game.render()
         if mode == "human":
             print(text)
