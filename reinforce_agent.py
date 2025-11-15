@@ -1,7 +1,8 @@
 import numpy as np
 
 from env import Game2048Env
-from typing import Any
+from typing import Literal, Any
+from dataclasses import dataclass
 
 from MLP import (
     MLPConfig,
@@ -12,28 +13,47 @@ from MLP import (
 )
 
 
+
+BaselineMode = Literal["off", "each", "batch"]
+
+@dataclass
+class ReinforceAgentConfig:
+    gamma: float = 1
+    learning_rate: float = 1e-3
+    baseline_mode: BaselineMode = "off"         # "off" / "each" / "batch"
+    model_seed: int = 0
+
+
+
 class ReinforceAgent:
-    def __init__(self, env: Game2048Env, mlp_config: MLPConfig, model_seed: int = 0):
+    def __init__(
+        self, 
+        env: Game2048Env, 
+        mlp_config: MLPConfig, 
+        agent_config: ReinforceAgentConfig | None = None
+    ):
         self.env = env
-        self.config = mlp_config
-        self.rng = np.random.default_rng(model_seed)
+        self.mlp_config = mlp_config
+        self.agent_config = agent_config or ReinforceAgentConfig()
+        
+        self.rng = np.random.default_rng(self.agent_config.model_seed)
 
         # get input_dim
         obs, info = self.env.reset(seed=0)
         x, action_mask = encode_observation(
-            obs, self.config.use_onehot
+            obs, self.mlp_config.use_onehot
         )
         input_dim = x.shape[0]
         n_actions = self.env.action_space.n
-
-        if self.config.num_layers == 0:
+        
+        if self.mlp_config.num_layers == 0:
             self.params = init_model_params_0layer(input_dim, n_actions, self.rng)
         else:
-            pass
+            raise NotImplementedError("multi layer not implement yet")
 
 
     def select_action(self, obs, rng: np.random.Generator) -> int | np.ndarray:
-        x, action_mask = encode_observation(obs, self.config.use_onehot)
+        x, action_mask = encode_observation(obs, self.mlp_config.use_onehot)
 
         logits = forward_logits_0layer(self.params, x)
 
@@ -49,10 +69,10 @@ class ReinforceAgent:
 
         policy_rng = np.random.default_rng(policy_seed)
 
-        obs_list = []
-        action_list = []
-        reward_list = []
-        probs_list = []
+        obs_list: list[Any] = []
+        action_list: list[int] = []
+        reward_list: list[float] = []
+        probs_list: list[np.ndarray] = []
 
         done = False
         total_reward = 0.0
