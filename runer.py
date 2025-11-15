@@ -16,11 +16,23 @@ def log_setup():
     )
 
 
+import time
+from functools import wraps
+def timer(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        start = time.perf_counter()
+        result = func(*args, **kwargs)
+        end = time.perf_counter()
+        print(f"{func.__name__} 运行耗时: {end - start:.6f} 秒")
+        return result
+    return wrapper
 
+@timer
 def main():
     log_setup()
     
-    train_seeds = range(5)
+    train_seeds = range(1)
 
     env_config = Game2048EnvConfig(
         obs_mode="raw",
@@ -40,7 +52,7 @@ def main():
     policy_base_seed = int(1e6)
 
     for i, env_seed in enumerate(train_seeds):
-        policy_seed = policy_base_seed + i
+        policy_seed = policy_base_seed + env_seed
 
         trajectory = agent.run_episode(env_seed, policy_seed)
         total_reward = trajectory["total_reward"]
@@ -54,5 +66,14 @@ def main():
     # TODO: training logic
 
 
+
+
 if __name__ == "__main__":
     main()
+
+
+
+# 20000 without training 623s
+
+
+
