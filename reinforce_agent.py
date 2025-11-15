@@ -13,10 +13,10 @@ from MLP import (
 
 
 class ReinforceAgent:
-    def __init__(self, env: Game2048Env, mlp_config: MLPConfig):
+    def __init__(self, env: Game2048Env, mlp_config: MLPConfig, model_seed: int = 0):
         self.env = env
         self.config = mlp_config
-        
+        self.rng = np.random.default_rng(model_seed)
 
         # get input_dim
         obs, info = self.env.reset(seed=0)
@@ -27,19 +27,19 @@ class ReinforceAgent:
         n_actions = self.env.action_space.n
 
         if self.config.num_layers == 0:
-            self.params = init_model_params_0layer(input_dim, n_actions)
+            self.params = init_model_params_0layer(input_dim, n_actions, self.rng)
         else:
             pass
 
 
-    def select_action(self, obs) -> int | np.ndarray:
+    def select_action(self, obs, rng: np.random.Generator) -> int | np.ndarray:
         x, action_mask = encode_observation(obs, self.config.use_onehot)
 
         logits = forward_logits_0layer(self.params, x)
 
         probs = logits_to_probs(logits, action_mask)
 
-        action = np.random.choice(len(probs), p=probs)
+        action = rng.choice(len(probs), p=probs)
 
         return action, probs
 
@@ -47,7 +47,7 @@ class ReinforceAgent:
     def run_episode(self, env_seed: int, policy_seed: int) -> dict[str | Any]:
         obs, info = self.env.reset(seed=env_seed)
 
-        np.random.seed(policy_seed)
+        policy_rng = np.random.default_rng(policy_seed)
 
         obs_list = []
         action_list = []
@@ -58,7 +58,7 @@ class ReinforceAgent:
         total_reward = 0.0
 
         while not done:
-            action, probs = self.select_action(obs)
+            action, probs = self.select_action(obs, policy_rng)
 
             next_obs, reward, terminated, truncated, info = self.env.step(action)
 

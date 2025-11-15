@@ -31,9 +31,14 @@ def encode_observation(obs, use_onehot: bool) -> tuple[np.ndarray, np.ndarray | 
     return x, action_mask
 
 
-def init_model_params_0layer(input_dim: int, n_actions: int) -> dict[str, Any]:
+def init_model_params_0layer(
+    input_dim: int, 
+    n_actions: int, 
+    rng: np.random.Generator
+) -> dict[str, Any]:
+    
     params = {}
-    W = np.random.standard_normal((input_dim, n_actions)).astype(np.float32) * 0.01
+    W = rng.standard_normal((input_dim, n_actions), dtype=np.float32) * 0.01
     b = np.zeros((n_actions,), dtype=np.float32)
 
     params["W"] = W
