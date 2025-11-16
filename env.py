@@ -48,7 +48,6 @@ class Game2048Env(gym.Env):
         if not self._logger.handlers:
             self._logger.addHandler(logging.NullHandler())
         
-        logging.getLogger("game.game2048.Game2048").disabled = True      # mute Game's logger
 
         # Gym spaces
         self.action_space = spaces.Discrete(4)  # 0: up, 1: right, 2: down, 3: left
@@ -146,9 +145,6 @@ class Game2048Env(gym.Env):
             "score": self.game.score,
             "raw_state": state,
         }
-
-        self._logger.debug("Env reset with seed=%s, initial_score=%s", seed, self.game.score)        
-        self._logger.debug("BOARD STATE\n"+self.render(mode="ansi"))
         
         return obs, info
     
@@ -231,17 +227,8 @@ class Game2048Env(gym.Env):
 
         # logging
         self._logger.debug(
-            "step=%d, action=%d, changed=%s, merged=%s, reward=%.3f, score=%d, done=%s, truncated=%s",
-            self._step_count,
-            action,
-            is_changed,
-            merged,
-            reward,
-            self.game.score,
-            terminated,
-            truncated,
+            f"reward={reward:.3f}, truncated={truncated}"
         )
-        self._logger.debug("BOARD STATE\n"+self.render(mode="ansi"))
 
         return obs, reward, terminated, truncated, info
 

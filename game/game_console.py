@@ -66,7 +66,7 @@ def main():
         
 def log_setup():
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,
         format="%(asctime)s [%(levelname)s] %(message)s",
         handlers=[
             logging.FileHandler("game2048.log", encoding="utf-8"),

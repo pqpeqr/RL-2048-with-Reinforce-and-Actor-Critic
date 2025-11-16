@@ -4,6 +4,8 @@ from env import Game2048Env
 from typing import Literal, Any
 from dataclasses import dataclass
 
+import logging
+
 from MLP import (
     MLPConfig,
     encode_observation,
@@ -37,6 +39,11 @@ class ReinforceAgent:
         self.agent_config = agent_config or ReinforceAgentConfig()
         
         self.rng = np.random.default_rng(self.agent_config.model_seed)
+        
+        # logging
+        self._logger = logging.getLogger(__name__ + ".ReinforceAgent")
+        if not self._logger.handlers:
+            self._logger.addHandler(logging.NullHandler())
 
         # get input_dim
         obs, info = self.env.reset(seed=0)
@@ -60,11 +67,17 @@ class ReinforceAgent:
         probs = logits_to_probs(logits, action_mask)
 
         action = rng.choice(len(probs), p=probs)
+        
+        self._logger.debug(
+            f"Selected action: {action}, probs: {probs}"
+        )
 
         return action, probs
 
 
     def run_episode(self, env_seed: int, policy_seed: int) -> dict[str | Any]:
+        self._logger.verbose(f"Episode start: env_seed={env_seed}, policy_seed={policy_seed}")
+        
         obs, info = self.env.reset(seed=env_seed)
 
         policy_rng = np.random.default_rng(policy_seed)
@@ -98,4 +111,8 @@ class ReinforceAgent:
             "probs": probs_list,
             "total_reward": total_reward,
         }
+        
+        self._logger.verbose(f"Episode finished, total_reward={total_reward:.3f}")
+        self._logger.verbose(f"ENDGAME STATE\n" + self.env.render(mode="ansi"))
+        
         return trajectory

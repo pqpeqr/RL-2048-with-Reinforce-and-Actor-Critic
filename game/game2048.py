@@ -22,11 +22,9 @@ class Game2048:
         
         # logging
         self._logger = logging.getLogger(__name__+".Game2048")
-        if not self._logger.handlers:
-            self._logger.addHandler(logging.NullHandler())
     
     def reset(self, seed: int | None = None) -> list[list[int]]:
-        self._log(f"------game reset------")
+        self._logger.debug(f"------game reset------")
         self._set_seed(seed)
         self.board = np.zeros((self.size, self.size), dtype=np.int64)
         self.step_count = 0
@@ -58,12 +56,16 @@ class Game2048:
         if is_changed:
             self._spawn()
 
-        self._log(
+        self._logger.debug(
+            f"step={self.step_count}, "
             f"action: {action}, "
             f"changed={is_changed}, "
+            f"merged={self._new_merged}, "
             f"step_score={step_score}, "
-            f"score={self.score}"
+            f"score={self.score}, "
+            f"done={is_done}"
         )
+        self._logger.debug("GAME STATE\n"+self.render())
         return is_changed, self.state, self._new_merged.copy(), is_done
     
     
@@ -94,18 +96,13 @@ class Game2048:
         for action in (0, 1, 2, 3):
             mask.append(1 if self._can_change_with_action(action) else 0)
         return mask
-    
-    def _log(self, msg: str) -> None:
-        try:
-            self._logger.info(msg)
-        except Exception:
-            pass
+
         
     def _set_seed(self, seed: int | None = None):
         if seed is None:
             seed = secrets.randbits(64)
         self._rng = np.random.default_rng(seed)
-        self._log(f"seed set: {seed}")
+        self._logger.debug(f"seed set: {seed}")
 
     def _spawn(self) -> None:
         empties = np.argwhere(self.board == 0)
@@ -185,7 +182,7 @@ class Game2048:
                 ):
                     return False
 
-        self._log("------game done------")
+        self._logger.debug("------game done------")
         return True
     
     @staticmethod
