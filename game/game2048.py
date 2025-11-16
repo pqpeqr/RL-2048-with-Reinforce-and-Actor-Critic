@@ -85,7 +85,7 @@ class Game2048:
                 "|"
             )
             lines.append(sep)
-        lines.append(f"Score: {self.score}")
+        # lines.append(f"Score: {self.score}")
         # print("\n".join(lines))
         return "\n".join(lines)
         
