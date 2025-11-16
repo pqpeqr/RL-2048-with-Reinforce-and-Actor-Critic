@@ -100,6 +100,8 @@ class ReinforceAgent:
             action, probs = self.select_action(obs, policy_rng)
 
             next_obs, reward, terminated, truncated, info = self.env.step(action)
+            
+            reward = float(reward)          # ensure reward is float
 
             obs_list.append(obs)
             action_list.append(action)
