@@ -18,12 +18,20 @@ logger = logging.getLogger(__name__)
 
 
 def log_setup():
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    stdout_handler.setLevel(logging.INFO)
+    
+    file_handler = logging.FileHandler("app.log", encoding="utf-8")
+    file_handler.setLevel(logging.DEBUG)
+    
+    fmt = "%(asctime)s [%(name)s] [%(levelname)s] %(message)s"
+    
     logging.basicConfig(
-        level=logging.VERBOSE,
-        format="%(asctime)s [%(name)s] [%(levelname)s] %(message)s",
+        level=logging.INFO,
+        format=fmt,
         handlers=[
-            logging.FileHandler("game2048.log", encoding="utf-8"),
-            logging.StreamHandler(sys.stdout)
+            file_handler,
+            stdout_handler
         ],
     )
 
