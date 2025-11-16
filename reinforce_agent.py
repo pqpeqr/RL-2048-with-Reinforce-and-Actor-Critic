@@ -124,3 +124,131 @@ class ReinforceAgent:
         self._logger.verbose(f"ENDGAME STATE\n" + self.env.render(mode="ansi"))
         
         return trajectory
+
+
+    def compute_returns(self, rewards: list[float]) -> np.ndarray:
+        '''
+        G_t = sum_{k=t}^{T-1} gamma^(k-t) R_{k+1}
+        G_{T-1} = R_T
+        G_{T-2} = R_{T-1} + gamma * G_T
+        G_{T-3} = R_{T-2} + gamma * G_{T-1} + gamma^2 * G_T
+        ...
+        '''
+        T = len(rewards)
+        returns = np.zeros(T, dtype=np.float32)
+
+        G = 0.0
+        gamma = self.agent_config.gamma
+
+        for t in reversed(range(T)):
+            G = rewards[t] + gamma * G
+            returns[t] = G
+
+        return returns
+    
+    
+    def _compute_advantages(
+        self,
+        returns_list: list[np.ndarray],
+    ) -> list[np.ndarray]:
+        """
+        A_t = G_t - baseline (depending on baseline_mode). 
+        Compute advantages based on baseline_mode:
+        - "off"  : advantage = returns
+        - "each" : baseline by episode, advantage = returns - mean(returns)
+        - "batch": baseline by batch, advantage = returns - mean(all returns in batch)
+        """
+        mode = self.agent_config.baseline_mode
+
+        if mode == "off":
+            return [r.astype(np.float32) for r in returns_list]
+
+        elif mode == "each":
+            advantages_list: list[np.ndarray] = []
+            for r in returns_list:
+                baseline = float(r.mean())
+                advantages = (r - baseline).astype(np.float32)
+                advantages_list.append(advantages)
+            return advantages_list
+
+        elif mode == "batch":
+            all_returns = np.concatenate(returns_list)
+            baseline = float(all_returns.mean())
+
+            advantages_list = [(r - baseline).astype(np.float32) for r in returns_list]
+            return advantages_list
+
+        else:
+            raise ValueError(f"Unknown baseline mode: {mode}")
+
+
+    def _policy_gradient_step(
+        self,
+        x: np.ndarray,
+        action: int,
+        probs: np.ndarray,
+        weight: float,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        '''
+        Compute policy gradient for one time step
+        '''
+        # one_hot(a_t)
+        one_hot = np.zeros_like(probs, dtype=np.float32)
+        one_hot[action] = 1.0
+
+        # gradient of logits:  d (log pi) / d z = one_hot - probs
+        grad_logits = weight * (one_hot - probs.astype(np.float32))
+
+        # grad b and W
+        grad_b = grad_logits
+        grad_W = np.outer(x.astype(np.float32), grad_logits)
+
+        return grad_W, grad_b
+
+
+    def update_batch(self, trajectories: list[dict[str, Any]]) -> None:
+        '''
+        Update model parameters using a batch of episode trajectories
+        '''
+        # 
+        returns_list: list[np.ndarray] = []
+        for traj in trajectories:
+            rewards = traj["rewards"]
+            returns = self.compute_returns(rewards)
+            returns_list.append(returns)
+
+        # A_t = G_t - baseline (depending on baseline_mode)
+        advantages_list = self._compute_advantages(returns_list)
+
+        # init W and b
+        W = self.params["W"]
+        b = self.params["b"]
+
+        grad_W = np.zeros_like(W, dtype=np.float32)
+        grad_b = np.zeros_like(b, dtype=np.float32)
+
+        # accumulate gradients
+        for traj, advantages in zip(trajectories, advantages_list):
+            obs_list = traj["obs"]
+            action_list = traj["actions"]
+            probs_list = traj["probs"]
+
+            for obs, action, adv, probs in zip(
+                obs_list, action_list, advantages, probs_list
+            ):
+                x, _ = encode_observation(obs, self.mlp_config.use_onehot)
+
+                dW, db = self._policy_gradient_step(
+                    x=x,
+                    action=action,
+                    probs=probs,
+                    weight=float(adv),
+                )
+
+                grad_W += dW
+                grad_b += db
+
+        # update parameters (gradient ascent)
+        lr = self.agent_config.learning_rate
+        self.params["W"] = W + lr * grad_W
+        self.params["b"] = b + lr * grad_b
