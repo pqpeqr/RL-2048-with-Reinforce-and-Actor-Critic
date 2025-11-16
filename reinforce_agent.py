@@ -20,8 +20,8 @@ BaselineMode = Literal["off", "each", "batch"]
 
 @dataclass
 class ReinforceAgentConfig:
-    gamma: float = 1
-    learning_rate: float = 1e-3
+    gamma: float = 1                            # [0, 1]
+    learning_rate: float = 1e-3                 # 
     baseline_mode: BaselineMode = "off"         # "off" / "each" / "batch"
     model_seed: int = 0
 
@@ -60,6 +60,9 @@ class ReinforceAgent:
 
 
     def select_action(self, obs, rng: np.random.Generator) -> int | np.ndarray:
+        '''
+        Given observation, select action according to policy
+        '''
         x, action_mask = encode_observation(obs, self.mlp_config.use_onehot)
 
         logits = forward_logits_0layer(self.params, x)
@@ -76,6 +79,9 @@ class ReinforceAgent:
 
 
     def run_episode(self, env_seed: int, policy_seed: int) -> dict[str | Any]:
+        '''
+        Run one episode, return trajectory dict
+        '''
         self._logger.verbose(f"Episode start: env_seed={env_seed}, policy_seed={policy_seed}")
         
         obs, info = self.env.reset(seed=env_seed)
