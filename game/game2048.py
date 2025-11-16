@@ -14,6 +14,7 @@ class Game2048:
         self.size = size
         
         self.board: np.ndarray = np.zeros((size, size), dtype=np.int64)
+        self.step_count: int = 0
         self.score: int = 0
         self._rng: np.random.Generator = np.random.default_rng()
         
@@ -28,6 +29,7 @@ class Game2048:
         self._log(f"------game reset------")
         self._set_seed(seed)
         self.board = np.zeros((self.size, self.size), dtype=np.int64)
+        self.step_count = 0
         self.score = 0
         self._spawn()
         self._spawn()
@@ -44,8 +46,11 @@ class Game2048:
         if action not in (0, 1, 2, 3):
             raise ValueError("invalid action")
 
+        self.step_count += 1
+        
         self._new_merged = []
         is_changed = self._move(action)
+        is_done = self._is_done()
 
         step_score = self._count_step_score()
         self.score += step_score
@@ -59,7 +64,8 @@ class Game2048:
             f"step_score={step_score}, "
             f"score={self.score}"
         )
-        return is_changed, self.state, self._new_merged.copy(), self._is_done()
+        return is_changed, self.state, self._new_merged.copy(), is_done
+    
     
     def render(self) -> str:
         state = self.state
