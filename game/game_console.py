@@ -1,7 +1,7 @@
 
 import logging
 
-from game2048 import Game2048, Action
+from .game2048 import Game2048, Action
 
 def _action_from_input(s: str) -> Action | None:
     s = s.strip().lower()
