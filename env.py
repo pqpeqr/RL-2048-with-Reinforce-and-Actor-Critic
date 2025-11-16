@@ -18,13 +18,13 @@ from game.game2048 import Game2048, Action
 @dataclass
 class Game2048EnvConfig:
     size: int = 4
-    obs_mode: ObsMode = "log2"             # raw / log2
-    reward_mode: RewardMode = "sum"        # sum / log2 / bonus
-    bonus_first_merge: bool = True         # T / F
-    bonus_value: float = 1.0               # bonus ratio
-    use_action_mask: bool = True           # T / F
-    invalid_action_penalty: float = -1.0   # penalty when not using action musk
-    max_steps: int = None                  # max step in an episode
+    obs_mode: ObsMode = "raw"               # raw / log2
+    reward_mode: RewardMode = "sum"         # sum / log2 / bonus
+    bonus_first_merge: bool = False         # T / F
+    bonus_value: float = 1.0                # bonus ratio
+    use_action_mask: bool = True            # T / F
+    invalid_action_penalty: float = -1.0    # penalty when not using action musk
+    max_steps: int = 1024                   # max step in an episode
     
 
 
