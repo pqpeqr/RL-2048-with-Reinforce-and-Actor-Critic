@@ -16,17 +16,6 @@ def log_setup():
     )
 
 
-import time
-from functools import wraps
-def timer(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        start = time.perf_counter()
-        result = func(*args, **kwargs)
-        end = time.perf_counter()
-        print(f"{func.__name__} 运行耗时: {end - start:.6f} 秒")
-        return result
-    return wrapper
 
 @timer
 def main():
