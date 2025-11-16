@@ -1,8 +1,11 @@
 import numpy as np
 
 from env import Game2048Env
+
 from typing import Literal, Any
 from dataclasses import dataclass
+from collections.abc import Iterator
+
 
 import logging
 
@@ -59,26 +62,72 @@ class ReinforceAgent:
             raise NotImplementedError("multi layer not implement yet")
 
 
-    def select_action(self, obs, rng: np.random.Generator) -> int | np.ndarray:
+    def select_action(
+        self, 
+        obs, 
+        rng: np.random.Generator, 
+        action_gen: Iterator[int] | None = None         # for debugging
+        ) -> int | np.ndarray:
         '''
         Given observation, select action according to policy
         '''
         x, action_mask = encode_observation(obs, self.mlp_config.use_onehot)
 
         logits = forward_logits_0layer(self.params, x)
-
         probs = logits_to_probs(logits, action_mask)
-
-        action = rng.choice(len(probs), p=probs)
         
         self._logger.debug(
-            f"Selected action: {action}, probs: {probs}"
+            f"Model logits: {logits}, probs: {probs}"
         )
+        
+        action = None
+
+        if action_gen is not None:
+            while True:
+                try:
+                    candidate = next(action_gen)
+                except StopIteration:
+                    self._logger.debug(
+                        f"Action generator exhausted."
+                    )
+                    break
+
+                if not (0 <= candidate < len(probs)):
+                    self._logger.debug(
+                        f"Candidate action {candidate} out of range."
+                    )
+                    continue
+
+                if action_mask is not None and not bool(action_mask[candidate]):
+                    self._logger.debug(
+                        f"Candidate action {candidate} masked out, skipping."
+                    )
+                    continue
+
+                action = int(candidate)
+                
+                self._logger.debug(
+                    f"Selected action:{action} from action_gen."
+                )   
+                break
+
+        # if no action from action_gen, sample from policy
+        if action is None:
+            action = rng.choice(len(probs), p=probs)
+
+            self._logger.debug(
+                f"Selected action:{action} from policy."
+            )
 
         return action, probs
 
 
-    def run_episode(self, env_seed: int, policy_seed: int) -> dict[str | Any]:
+    def run_episode(
+        self, 
+        env_seed: int, 
+        policy_seed: int,
+        action_gen: Iterator[int] | None = None
+        ) -> dict[str | Any]:
         '''
         Run one episode, return trajectory dict
         '''
@@ -97,7 +146,7 @@ class ReinforceAgent:
         total_reward = 0.0
 
         while not done:
-            action, probs = self.select_action(obs, policy_rng)
+            action, probs = self.select_action(obs, policy_rng, action_gen)
 
             next_obs, reward, terminated, truncated, info = self.env.step(action)
             
