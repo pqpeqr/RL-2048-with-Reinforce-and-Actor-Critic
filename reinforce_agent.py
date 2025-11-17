@@ -298,6 +298,10 @@ class ReinforceAgent:
 
                 grad_W += dW
                 grad_b += db
+                
+                self._logger.debug(
+                    f"Step grad_W norm: {np.linalg.norm(dW):.6f}, grad_b norm: {np.linalg.norm(db):.6f}"
+                )
 
         # update parameters (gradient ascent)
         lr = self.agent_config.learning_rate
