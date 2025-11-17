@@ -18,6 +18,10 @@ logger = logging.getLogger(__name__)
 
 
 def log_setup():
+    root = logging.getLogger()  # root logger
+    if root.handlers:
+        return
+    
     stdout_handler = logging.StreamHandler(sys.stdout)
     stdout_handler.setLevel(logging.INFO)
     
@@ -29,10 +33,7 @@ def log_setup():
     logging.basicConfig(
         level=logging.INFO,
         format=fmt,
-        handlers=[
-            file_handler,
-            stdout_handler
-        ],
+        handlers=[file_handler, stdout_handler],
     )
 
 
@@ -63,7 +64,7 @@ def evaluation():
 
     mlp_config = MLPConfig(
         use_onehot=False,
-        num_layers=0,
+        hidden_sizes=[],
         activation="Sigmoid",
     )
 
@@ -112,18 +113,18 @@ def training():
 
     # 32*625 = 20_000 total
     batch_size = 32
-    num_batches = 1
+    num_batches = 50
 
     env_config = Game2048EnvConfig(
         obs_mode="log2",
         reward_mode="sum",
-        use_action_mask=False,
+        use_action_mask=True,
     )
     env = Game2048Env(env_config)
 
     mlp_config = MLPConfig(
         use_onehot=False,
-        num_layers=0,
+        hidden_sizes=[],
         activation="Sigmoid",
     )
 

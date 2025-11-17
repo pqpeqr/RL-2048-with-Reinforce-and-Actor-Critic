@@ -35,7 +35,8 @@ class ReinforceAgent:
         self, 
         env: Game2048Env, 
         mlp_config: MLPConfig, 
-        agent_config: ReinforceAgentConfig | None = None
+        agent_config: ReinforceAgentConfig | None = None, 
+        initial_params: dict[str, np.ndarray] | None = None,
     ):
         self.env = env
         self.mlp_config = mlp_config
@@ -254,7 +255,7 @@ class ReinforceAgent:
         grad_b = grad_logits
         grad_W = np.outer(x.astype(np.float32), grad_logits)
 
-        return grad_W, grad_b
+        return [grad_W], [grad_b]
 
 
     def update_batch(self, trajectories: list[dict[str, Any]]) -> None:
@@ -271,12 +272,16 @@ class ReinforceAgent:
         # A_t = G_t - baseline (depending on baseline_mode)
         advantages_list = self._compute_advantages(returns_list)
 
-        # init W and b
-        W = self.params["W"][0]     # 0 layer for now
-        b = self.params["b"][0]
+        W_list: list[np.ndarray] = self.params["W"]
+        b_list: list[np.ndarray] = self.params["b"]
 
-        grad_W = np.zeros_like(W, dtype=np.float32)
-        grad_b = np.zeros_like(b, dtype=np.float32)
+        # initialize gradients
+        grad_W_list: list[np.ndarray] = [
+            np.zeros_like(W_l, dtype=np.float32) for W_l in W_list
+        ]
+        grad_b_list: list[np.ndarray] = [
+            np.zeros_like(b_l, dtype=np.float32) for b_l in b_list
+        ]
 
         # accumulate gradients
         for traj, advantages in zip(trajectories, advantages_list):
@@ -289,21 +294,33 @@ class ReinforceAgent:
             ):
                 x, _ = encode_observation(obs, self.mlp_config.use_onehot)
 
-                dW, db = self._policy_gradient_step(
+                dW_list, db_list = self._policy_gradient_step(
                     x=x,
                     action=action,
                     probs=probs,
                     weight=float(adv),
                 )
 
-                grad_W += dW
-                grad_b += db
+                for l in range(len(grad_W_list)):
+                    grad_W_list[l] += dW_list[l]
+                    grad_b_list[l] += db_list[l]
                 
-                self._logger.debug(
-                    f"Step grad_W norm: {np.linalg.norm(dW):.6f}, grad_b norm: {np.linalg.norm(db):.6f}"
-                )
+        # logging for gradient norms
+        if self._logger.isEnabledFor(logging.INFO):
+            step_grad_W_norms = [np.linalg.norm(dW_l) for dW_l in dW_list]
+            step_grad_b_norms = [np.linalg.norm(db_l) for db_l in db_list]
+            
+            step_grad_W_norms_str = ", ".join(f"{n:.6f}" for n in step_grad_W_norms)
+            step_grad_b_norms_str = ", ".join(f"{n:.6f}" for n in step_grad_b_norms)
+
+            self._logger.info(
+                f"Step grad_W norms: [{step_grad_W_norms_str}], "
+                f"grad_b norms: [{step_grad_b_norms_str}]"
+            )
+
 
         # update parameters (gradient ascent)
         lr = self.agent_config.learning_rate
-        self.params["W"][0] = W + lr * grad_W
-        self.params["b"][0] = b + lr * grad_b
+        for l in range(len(W_list)):
+            self.params["W"][l] = W_list[l] + lr * grad_W_list[l]
+            self.params["b"][l] = b_list[l] + lr * grad_b_list[l]
