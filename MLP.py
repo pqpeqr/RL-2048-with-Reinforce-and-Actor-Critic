@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Literal
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 ActivationMode = Literal["Sigmoid", "ReLU", ]
@@ -9,9 +9,13 @@ ActivationMode = Literal["Sigmoid", "ReLU", ]
 
 @dataclass
 class MLPConfig:
-    use_onehot: bool = False                # T / F
-    num_layers: int = 0                     # 0 / 1 / 2/ 3
-    activation: ActivationMode = "Sigmoid"  # "Sigmoid" / "ReLU"
+    use_onehot: bool = False                                # T / F
+    hidden_sizes: list[int] = field(default_factory=list)   # list of hidden layer sizes
+    activation: ActivationMode = "Sigmoid"                  # "Sigmoid" / "ReLU"
+    
+    @property
+    def num_layers(self) -> int:
+        return len(self.hidden_sizes)
     
     
 def encode_observation(obs, use_onehot: bool) -> tuple[np.ndarray, np.ndarray | None]:
@@ -41,22 +45,65 @@ def encode_observation(obs, use_onehot: bool) -> tuple[np.ndarray, np.ndarray | 
 
     return x, action_mask
 
-
-def init_model_params_0layer(
+def init_model_params(
     input_dim: int, 
-    n_actions: int, 
+    hidden_sizes: list[int], 
+    output_dim: int, 
     rng: np.random.Generator
 ) -> dict[str, Any]:
     '''
-    Initialize model parameters for 0-layer MLP (linear model)
+    Initialize model parameters for MLP
+    Input:
+        input_dim: dimension of input vector
+        hidden_sizes: list of hidden layer sizes
+        output_dim: number of actions
+        rng: random number generator
     '''
-    params = {}
-    W = rng.standard_normal((input_dim, n_actions), dtype=np.float32) * 0.01
-    b = np.zeros((n_actions,), dtype=np.float32)
+    layer_sizes = [input_dim] + hidden_sizes + [output_dim]
+    
+    Ws: list[np.ndarray] = []
+    bs: list[np.ndarray] = []
+    
+    for in_dim, out_dim in zip(layer_sizes[:-1], layer_sizes[1:]):
+        W = rng.standard_normal((in_dim, out_dim), dtype=np.float32) * 0.01
+        b = np.zeros((out_dim,), dtype=np.float32)
+        
+        Ws.append(W)
+        bs.append(b)
+    
+    return {"W": Ws, "b": bs}
 
-    params["W"] = W
-    params["b"] = b
-    return params
+
+def _apply_activation(x: np.ndarray, mode: ActivationMode) -> np.ndarray:
+    if mode == "Sigmoid":
+        return 1.0 / (1.0 + np.exp(-x))
+    elif mode == "ReLU":
+        return np.maximum(x, 0.0)
+    else:
+        raise ValueError(f"Unsupported activation: {mode}")
+
+
+def forward_logits(
+    params: dict[str, list[np.ndarray]],
+    x: np.ndarray,
+    activation: ActivationMode,
+) -> np.ndarray:
+    h = x.astype(np.float32)
+    Ws = params["W"]
+    bs = params["b"]
+
+    num_layers = len(Ws)
+    assert num_layers == len(bs), "W/b layer count mismatch"
+
+    for i in range(num_layers):
+        W = Ws[i]
+        b = bs[i]
+        h = h @ W + b
+
+        if i < num_layers - 1:
+            h = _apply_activation(h, activation)
+
+    return h
 
 
 def forward_logits_0layer(params, x) -> np.ndarray:

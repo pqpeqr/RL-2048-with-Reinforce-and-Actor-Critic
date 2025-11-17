@@ -12,8 +12,8 @@ import logging
 from MLP import (
     MLPConfig,
     encode_observation,
-    init_model_params_0layer,
-    forward_logits_0layer,
+    init_model_params,
+    forward_logits,
     logits_to_probs,
 )
 
@@ -56,10 +56,12 @@ class ReinforceAgent:
         input_dim = x.shape[0]
         n_actions = self.env.action_space.n
         
-        if self.mlp_config.num_layers == 0:
-            self.params = init_model_params_0layer(input_dim, n_actions, self.rng)
-        else:
-            raise NotImplementedError("multi layer not implement yet")
+
+        self.params = init_model_params(input_dim, 
+                                        self.mlp_config.hidden_sizes, 
+                                        n_actions,
+                                        self.rng)
+
 
 
     def select_action(
@@ -73,7 +75,7 @@ class ReinforceAgent:
         '''
         x, action_mask = encode_observation(obs, self.mlp_config.use_onehot)
 
-        logits = forward_logits_0layer(self.params, x)
+        logits = forward_logits(self.params, x, self.mlp_config.activation)
         probs = logits_to_probs(logits, action_mask)
         
         self._logger.debug(
@@ -270,8 +272,8 @@ class ReinforceAgent:
         advantages_list = self._compute_advantages(returns_list)
 
         # init W and b
-        W = self.params["W"]
-        b = self.params["b"]
+        W = self.params["W"][0]     # 0 layer for now
+        b = self.params["b"][0]
 
         grad_W = np.zeros_like(W, dtype=np.float32)
         grad_b = np.zeros_like(b, dtype=np.float32)
@@ -299,5 +301,5 @@ class ReinforceAgent:
 
         # update parameters (gradient ascent)
         lr = self.agent_config.learning_rate
-        self.params["W"] = W + lr * grad_W
-        self.params["b"] = b + lr * grad_b
+        self.params["W"][0] = W + lr * grad_W
+        self.params["b"][0] = b + lr * grad_b
