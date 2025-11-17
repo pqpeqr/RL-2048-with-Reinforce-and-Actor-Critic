@@ -9,7 +9,8 @@ from gymnasium import spaces
 
 
 ObsMode = Literal["raw", "log2"]
-RewardMode = Literal["sum", "log2", "bonus"]
+RewardMode = Literal["sum", "log2"]
+BonusMode = Literal["off", "raw", "log2"]
 
 
 from game.game2048 import Game2048, Action
@@ -19,9 +20,8 @@ from game.game2048 import Game2048, Action
 class Game2048EnvConfig:
     size: int = 4
     obs_mode: ObsMode = "raw"               # raw / log2
-    reward_mode: RewardMode = "sum"         # sum / log2 / bonus
-    bonus_first_merge: bool = False         # T / F
-    bonus_value: float = 1.0                # bonus ratio
+    reward_mode: RewardMode = "sum"         # sum / log2
+    bonus_mode: BonusMode = "off"           # off / raw / log2
     use_action_mask: bool = True            # T / F
     invalid_action_penalty: float = -1.0    # penalty when not using action musk
     max_steps: int = 1024                   # max step in an episode
@@ -166,29 +166,31 @@ class Game2048Env(gym.Env):
 
         if cfg.reward_mode == "sum":
             reward = float(base)
-
+            
         elif cfg.reward_mode == "log2":
             # log 2 reward
             reward = 0.0
             for v in merged:
                 if v > 0:
                     reward += float(np.log2(v))
-
-        elif cfg.reward_mode == "bonus":
-            # base reward no change
-            reward = float(base)
-
-            if cfg.bonus_first_merge and merged:
-                max_merged = max(merged)
-
-                # only when >=8, to avoid disturbance form 4 at beginning of game
-                if max_merged >= 8 and max_merged > self._max_tile_seen:
-                    reward += cfg.bonus_value * float(np.log2(max_merged))
-                    self._max_tile_seen = max_merged
+                    
         else:
-            # should not reach here
-            reward = float(base)
-
+            raise ValueError(f"Unsupported reward mode: {cfg.reward_mode}")
+        
+        bonus = 0.0
+        max_merged = max(merged, default=0)
+        # only when >=8, to avoid disturbance form 4 at beginning of game
+        if max_merged >= 8 and max_merged > self._max_tile_seen:
+            if cfg.bonus_mode == "off":
+                pass
+            elif cfg.bonus_mode == "raw":
+                bonus = float(max_merged)
+            elif cfg.bonus_mode == "log2":
+                bonus = float(np.log2(max_merged))
+            else:
+                raise ValueError(f"Unsupported bonus mode: {cfg.bonus_mode}")
+            self._max_tile_seen = max_merged
+        reward += bonus
         return reward
     
     
