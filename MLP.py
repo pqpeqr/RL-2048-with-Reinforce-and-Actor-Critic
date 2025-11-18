@@ -106,16 +106,6 @@ def forward_logits(
     return h
 
 
-def forward_logits_0layer(params, x) -> np.ndarray:
-    '''
-    Forward pass for 0-layer MLP (linear model)
-    '''
-    W = params["W"]
-    b = params["b"]
-    logits = x @ W + b
-    return logits
-
-
 def logits_to_probs(logits, action_mask = None) -> np.ndarray:
     '''
     Convert logits to action probabilities using softmax
