@@ -2,7 +2,7 @@ import numpy as np
 from typing import Literal
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Callable, Any
 
 ActivationMode = Literal["Sigmoid", "ReLU", ]
 
@@ -118,27 +118,6 @@ def _apply_activation(x: np.ndarray, mode: ActivationMode) -> np.ndarray:
         raise ValueError(f"Unsupported activation: {mode}")
 
 
-def forward_logits(
-    params: dict[str, list[np.ndarray]],
-    x: np.ndarray,
-    activation: ActivationMode,
-) -> np.ndarray:
-    h = x.astype(np.float32)
-    Ws = params["W"]
-    bs = params["b"]
-
-    num_layers = len(Ws)
-    assert num_layers == len(bs), "W/b layer count mismatch"
-
-    for i in range(num_layers):
-        W = Ws[i]
-        b = bs[i]
-        h = h @ W + b
-
-        if i < num_layers - 1:
-            h = _apply_activation(h, activation)
-
-    return h
 
 
 def logits_to_probs(logits, action_mask = None) -> np.ndarray:
@@ -155,3 +134,48 @@ def logits_to_probs(logits, action_mask = None) -> np.ndarray:
     exps = np.exp(logits - max_logit)
     probs = exps / np.sum(exps)
     return probs
+
+
+def forward_logits(
+    params: dict[str, list[np.ndarray]],
+    x: np.ndarray,
+    activation_mode: ActivationMode,
+) -> tuple[np.ndarray, list[np.ndarray], list[np.ndarray]]:
+    """
+    Forward pass with caching of activations and pre-activations.
+    Returns:
+        logits: output logits
+        activations: [a_0, a_1, ..., a_L]
+        pre_activations: [z_0, z_1, ..., z_{L-1}]
+    """
+    act = x.astype(np.float32)  # activation
+    Ws = params["W"]
+    bs = params["b"]
+
+    num_layers = len(Ws)
+    assert num_layers == len(bs), "W/b layer count mismatch"
+
+    activations: list[np.ndarray] = [act]       # a_0 = x
+    pre_activations: list[np.ndarray] = []      # z_i
+
+    for i in range(num_layers):
+        W = Ws[i]
+        b = bs[i]
+
+        pre_act = act @ W + b           # z_i
+        pre_activations.append(pre_act)
+
+        if i < num_layers - 1:
+            act = _apply_activation(pre_act, activation_mode)  # a_{i+1}
+        else:
+            act = pre_act   # logits
+
+        activations.append(act)
+
+    logits = act
+    return logits, activations, pre_activations
+
+
+
+
+

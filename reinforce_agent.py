@@ -10,15 +10,7 @@ from collections.abc import Iterator
 
 import logging
 
-from MLP import (
-    MLPConfig,
-    encode_observation,
-    init_model_params,
-    forward_logits,
-    logits_to_probs,
-    load_model_params,
-    save_model_params,
-)
+from MLP import *
 
 
 
@@ -69,7 +61,6 @@ class ReinforceAgent:
             self.params = load_model_params(initial_params_path)
     
     
-    
     def load_model(self, file_path: str | None = "params.npz") -> None:
         '''
         Load model parameters from npz file
@@ -97,7 +88,11 @@ class ReinforceAgent:
         '''
         x, action_mask = encode_observation(obs, self.mlp_config.use_onehot)
 
-        logits = forward_logits(self.params, x, self.mlp_config.activation)
+        logits, activations, pre_activations = forward_logits(
+            self.params,
+            x,
+            self.mlp_config.activation,
+        )
         probs = logits_to_probs(logits, action_mask)
         
         self._logger.debug(
@@ -139,7 +134,6 @@ class ReinforceAgent:
             )
 
         return action, probs
-
 
 
     def run_episode(
@@ -259,7 +253,7 @@ class ReinforceAgent:
         x: np.ndarray,
         action: int,
         probs: np.ndarray,
-        weight: float,
+        advantage: float,
     ) -> tuple[list[np.ndarray], list[np.ndarray]]:
         '''
         Compute policy gradient for one time step
@@ -269,13 +263,15 @@ class ReinforceAgent:
         one_hot[action] = 1.0
 
         # gradient of logits:  d (log pi) / d z = one_hot - probs
-        grad_logits = weight * (one_hot - probs.astype(np.float32))
+        grad_logits = advantage * (one_hot - probs.astype(np.float32))
 
         # grad b and W
-        grad_b = grad_logits
-        grad_W = np.outer(x.astype(np.float32), grad_logits)
+        dW_list, db_list = self._backpropagation(
+            x=x.astype(np.float32),
+            grad_logits=grad_logits,
+        )
 
-        return [grad_W], [grad_b]
+        return dW_list, db_list
 
 
     def update_batch(self, trajectories: list[dict[str, Any]]) -> None:
@@ -320,7 +316,7 @@ class ReinforceAgent:
                     x=x,
                     action=action,
                     probs=probs,
-                    weight=float(adv),
+                    advantage=float(adv),
                 )
 
                 for l in range(len(grad_W_list)):
@@ -354,3 +350,64 @@ class ReinforceAgent:
         for l in range(len(W_list)):
             self.params["W"][l] = W_list[l] + lr * grad_W_list[l]
             self.params["b"][l] = b_list[l] + lr * grad_b_list[l]
+            
+            
+            
+    def _activation_derivative(self, z: np.ndarray) -> np.ndarray:
+        """
+        Compute the derivative of the activation function
+        """
+        if self.mlp_config.activation == "Sigmoid":
+            # σ(z) = 1 / (1 + exp(-z))
+            s = 1.0 / (1.0 + np.exp(-z))
+            return s * (1.0 - s)
+        elif self.mlp_config.activation == "ReLU":
+            # ReLU'(z) = 1 if z > 0 else 0
+            return (z > 0).astype(np.float32)
+        else:
+            raise ValueError(f"Unsupported activation: {self.mlp_config.activation}")
+        
+        
+    def _backpropagation(
+        self,
+        x: np.ndarray,
+        grad_logits: np.ndarray,
+    ) -> tuple[list[np.ndarray], list[np.ndarray]]:
+        """
+        Backpropagation through MLP to compute gradients of parameters
+        """
+        logits, activations, pre_activations = forward_logits(
+            self.params,
+            x,
+            self.mlp_config.activation,
+        )
+
+        Ws: list[np.ndarray] = self.params["W"]
+        bs: list[np.ndarray] = self.params["b"]
+        num_layers = len(Ws)
+
+        # init gradients
+        grad_W_list: list[np.ndarray] = [
+            np.zeros_like(W, dtype=np.float32) for W in Ws
+        ]
+        grad_b_list: list[np.ndarray] = [
+            np.zeros_like(b, dtype=np.float32) for b in bs
+        ]
+
+        delta = grad_logits.astype(np.float32)
+
+        for l in reversed(range(num_layers)):
+            a_prev = activations[l]
+            grad_W_list[l] = np.outer(a_prev, delta)
+            grad_b_list[l] = delta
+
+            if l > 0:
+                W_l = Ws[l]
+                da_prev = delta @ W_l.T
+                z_prev = pre_activations[l - 1]
+                dz_prev = da_prev * self._activation_derivative(
+                    z_prev,
+                )
+                delta = dz_prev
+
+        return grad_W_list, grad_b_list
