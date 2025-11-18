@@ -2,6 +2,7 @@ import numpy as np
 
 from env import Game2048Env
 
+from collections.abc import Callable
 from typing import Literal, Any
 from dataclasses import dataclass
 from collections.abc import Iterator
@@ -87,10 +88,12 @@ class ReinforceAgent:
         self, 
         obs, 
         rng: np.random.Generator, 
-        action_gen: Iterator[int] | None = None,        # for debugging
-        ) -> tuple[int, np.ndarray]:
+        action_fn: Callable[[Any, np.ndarray | None], int] | None = None,
+    ) -> tuple[int, np.ndarray]:
         '''
-        Given observation, select action according to policy
+        Given observation, select action according to policy.
+        If `action_fn` is provided, use it to select the final action,
+        bypassing the model's action-selection logic.
         '''
         x, action_mask = encode_observation(obs, self.mlp_config.use_onehot)
 
@@ -101,46 +104,42 @@ class ReinforceAgent:
             f"Model logits: {logits}, probs: {probs}"
         )
         
-        action = None
+        action: int | None = None
 
-        if action_gen is not None:
-            while True:
-                try:
-                    candidate = next(action_gen)
-                except StopIteration:
-                    self._logger.debug(
-                        f"Action generator exhausted."
-                    )
-                    break
-
+        if action_fn is not None:
+            try:
+                candidate = int(action_fn(obs, action_mask))
+            except Exception as e:
+                self._logger.exception(
+                    f"action_fn raised an exception: {e}. Falling back to policy."
+                )
+            else:
+                # check candidate validity
                 if not (0 <= candidate < len(probs)):
-                    self._logger.debug(
-                        f"Candidate action {candidate} out of range."
+                    self._logger.warning(
+                        f"action_fn returned out-of-range action {candidate}, "
+                        "falling back to policy."
                     )
-                    continue
-
-                if action_mask is not None and not bool(action_mask[candidate]):
-                    self._logger.debug(
-                        f"Candidate action {candidate} masked out, skipping."
+                elif action_mask is not None and not bool(action_mask[candidate]):
+                    self._logger.warning(
+                        f"action_fn returned masked-out action {candidate}, "
+                        "falling back to policy."
                     )
-                    continue
-
-                action = int(candidate)
-                
-                self._logger.debug(
-                    f"Selected action:{action} from action_gen."
-                )   
-                break
-
-        # if no action from action_gen, sample from policy
+                else:
+                    action = candidate
+                    self._logger.warning(
+                        f"Selected action:{action} from action_fn."
+                    )
+        
         if action is None:
-            action = rng.choice(len(probs), p=probs)
+            action = int(rng.choice(len(probs), p=probs))
 
             self._logger.debug(
                 f"Selected action:{action} from policy."
             )
 
         return action, probs
+
 
 
     def run_episode(
