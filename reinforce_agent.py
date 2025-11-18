@@ -15,6 +15,8 @@ from MLP import (
     init_model_params,
     forward_logits,
     logits_to_probs,
+    load_model_params,
+    save_model_params,
 )
 
 
@@ -36,7 +38,7 @@ class ReinforceAgent:
         env: Game2048Env, 
         mlp_config: MLPConfig, 
         agent_config: ReinforceAgentConfig | None = None, 
-        initial_params: dict[str, np.ndarray] | None = None,    # TODO
+        initial_params_path: str | None = None,
     ):
         self.env = env
         self.mlp_config = mlp_config
@@ -57,12 +59,28 @@ class ReinforceAgent:
         input_dim = x.shape[0]
         n_actions = self.env.action_space.n
         
-
-        self.params = init_model_params(input_dim, 
-                                        self.mlp_config.hidden_sizes, 
-                                        n_actions,
-                                        self.rng)
-
+        if initial_params_path is None:
+            self.params = init_model_params(input_dim,
+                                            self.mlp_config.hidden_sizes,
+                                            n_actions,
+                                            self.rng)
+        else:
+            self.params = load_model_params(initial_params_path)
+    
+    
+    
+    def load_model(self, file_path: str | None = "params.npz") -> None:
+        '''
+        Load model parameters from npz file
+        '''
+        self.params = load_model_params(file_path)
+    
+    
+    def save_model(self, file_path: str | None = "params.npz") -> None:
+        '''
+        Save model parameters to npz file
+        '''
+        save_model_params(self.params, file_path)
 
 
     def select_action(

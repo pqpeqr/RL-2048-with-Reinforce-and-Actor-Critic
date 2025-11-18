@@ -58,6 +58,8 @@ def init_model_params(
         hidden_sizes: list of hidden layer sizes
         output_dim: number of actions
         rng: random number generator
+    Output:
+        params: dict of model parameters
     '''
     layer_sizes = [input_dim] + hidden_sizes + [output_dim]
     
@@ -72,6 +74,40 @@ def init_model_params(
         bs.append(b)
     
     return {"W": Ws, "b": bs}
+
+
+def load_model_params(file_path: str | None = "params.npz") -> dict[str, Any]:
+    """
+    Load model parameters from npz file.
+    """
+    data = np.load(file_path)
+    n_layers = int(data["n_layers"])
+
+    Ws = [data[f"W_{i}"] for i in range(n_layers)]
+    bs = [data[f"b_{i}"] for i in range(n_layers)]
+
+    return {"W": Ws, "b": bs}
+
+
+def save_model_params(params: dict[str, Any], file_path: str | None = "params.npz") -> None:
+    """
+    Save model parameters to npz file.
+    """
+    Ws = list(params["W"])
+    bs = list(params["b"])
+
+    if len(Ws) != len(bs):
+        raise ValueError(f"len(Ws)={len(Ws)} != len(bs)={len(bs)}")
+
+    n_layers = len(Ws)
+
+    data = {"n_layers": np.array(n_layers, dtype=np.int64)}
+    for i in range(n_layers):
+        data[f"W_{i}"] = np.asarray(Ws[i])
+        data[f"b_{i}"] = np.asarray(bs[i])
+
+    np.savez(file_path, **data)
+    
 
 
 def _apply_activation(x: np.ndarray, mode: ActivationMode) -> np.ndarray:
