@@ -41,7 +41,7 @@ class Game2048Env(gym.Env):
         self._step_count = 0
 
         # max tile record for bonus reward
-        self._max_tile_seen: int = 4
+        self.max_tile_seen: int = 4
 
         # logger
         self._logger = logging.getLogger(__name__ + ".Game2048Env")
@@ -135,7 +135,7 @@ class Game2048Env(gym.Env):
         super().reset(seed=seed)
 
         self._step_count = 0
-        self._max_tile_seen = 4
+        self.max_tile_seen = 4
         
         state = self.game.reset(seed=seed)
 
@@ -180,7 +180,7 @@ class Game2048Env(gym.Env):
         bonus = 0.0
         max_merged = max(merged, default=0)
         # only when >=8, to avoid disturbance form 4 at beginning of game
-        if max_merged >= 8 and max_merged > self._max_tile_seen:
+        if max_merged >= 8 and max_merged > self.max_tile_seen:
             if cfg.bonus_mode == "off":
                 pass
             elif cfg.bonus_mode == "raw":
@@ -189,7 +189,7 @@ class Game2048Env(gym.Env):
                 bonus = float(np.log2(max_merged))
             else:
                 raise ValueError(f"Unsupported bonus mode: {cfg.bonus_mode}")
-            self._max_tile_seen = max_merged
+            self.max_tile_seen = max_merged
         reward += bonus
         return reward
     

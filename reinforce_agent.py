@@ -181,6 +181,8 @@ class ReinforceAgent:
             total_reward += reward
             obs = next_obs
             done = terminated or truncated
+        
+        max_tile = self.env.max_tile_seen
 
         trajectory = {
             "obs": obs_list,
@@ -188,9 +190,10 @@ class ReinforceAgent:
             "rewards": reward_list,
             "probs": probs_list,
             "total_reward": total_reward,
+            "max_tile": max_tile,
         }
         
-        self._logger.verbose(f"Episode finished, total_reward={total_reward:.3f}")
+        self._logger.verbose(f"Episode finished, total_reward={total_reward:.3f}, max_tile={max_tile}")
         self._logger.verbose(f"ENDGAME STATE\n" + self.env.render(mode="ansi"))
         
         return trajectory
