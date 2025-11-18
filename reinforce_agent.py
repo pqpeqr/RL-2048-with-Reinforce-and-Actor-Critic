@@ -70,7 +70,7 @@ class ReinforceAgent:
         obs, 
         rng: np.random.Generator, 
         action_gen: Iterator[int] | None = None         # for debugging
-        ) -> int | np.ndarray:
+        ) -> tuple[int, np.ndarray]:
         '''
         Given observation, select action according to policy
         '''
@@ -240,7 +240,7 @@ class ReinforceAgent:
         action: int,
         probs: np.ndarray,
         weight: float,
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[list[np.ndarray], list[np.ndarray]]:
         '''
         Compute policy gradient for one time step
         '''
@@ -282,6 +282,8 @@ class ReinforceAgent:
         grad_b_list: list[np.ndarray] = [
             np.zeros_like(b_l, dtype=np.float32) for b_l in b_list
         ]
+
+        total_steps = 0
 
         # accumulate gradients
         for traj, advantages in zip(trajectories, advantages_list):
