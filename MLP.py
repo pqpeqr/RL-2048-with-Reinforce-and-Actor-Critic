@@ -96,8 +96,7 @@ def save_model_params(params: dict[str, Any], file_path: str | None = "params.np
     Ws = list(params["W"])
     bs = list(params["b"])
 
-    if len(Ws) != len(bs):
-        raise ValueError(f"len(Ws)={len(Ws)} != len(bs)={len(bs)}")
+    assert len(Ws) == len(bs), "W/b layer count mismatch"
 
     n_layers = len(Ws)
 
