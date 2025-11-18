@@ -36,7 +36,7 @@ class ReinforceAgent:
         env: Game2048Env, 
         mlp_config: MLPConfig, 
         agent_config: ReinforceAgentConfig | None = None, 
-        initial_params: dict[str, np.ndarray] | None = None,
+        initial_params: dict[str, np.ndarray] | None = None,    # TODO
     ):
         self.env = env
         self.mlp_config = mlp_config
@@ -69,7 +69,7 @@ class ReinforceAgent:
         self, 
         obs, 
         rng: np.random.Generator, 
-        action_gen: Iterator[int] | None = None         # for debugging
+        action_gen: Iterator[int] | None = None,        # for debugging
         ) -> tuple[int, np.ndarray]:
         '''
         Given observation, select action according to policy
@@ -129,7 +129,7 @@ class ReinforceAgent:
         self, 
         env_seed: int, 
         policy_seed: int,
-        action_gen: Iterator[int] | None = None
+        action_gen: Iterator[int] | None = None,
         ) -> dict[str | Any]:
         '''
         Run one episode, return trajectory dict
