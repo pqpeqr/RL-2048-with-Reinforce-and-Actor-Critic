@@ -9,7 +9,6 @@ ActivationMode = Literal["Sigmoid", "ReLU", ]
 
 @dataclass
 class MLPConfig:
-    use_onehot: bool = False                                # T / F
     hidden_sizes: list[int] = field(default_factory=list)   # list of hidden layer sizes
     activation: ActivationMode = "Sigmoid"                  # "Sigmoid" / "ReLU"
     
@@ -18,7 +17,7 @@ class MLPConfig:
         return len(self.hidden_sizes)
     
     
-def encode_observation(obs, use_onehot: bool) -> tuple[np.ndarray, np.ndarray | None]:
+def encode_observation(obs) -> tuple[np.ndarray, np.ndarray | None]:
     '''
     Encode observation into input vector x for MLP
     Input:
@@ -37,11 +36,7 @@ def encode_observation(obs, use_onehot: bool) -> tuple[np.ndarray, np.ndarray | 
         board = obs
         action_mask = None
 
-    if use_onehot:
-        # TODO
-        raise NotImplementedError("onehot not implement yet")
-    else:
-        x = board.astype(np.float32).flatten()
+    x = board.astype(np.float32).flatten()
 
     return x, action_mask
 

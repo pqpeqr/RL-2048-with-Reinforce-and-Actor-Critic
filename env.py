@@ -19,7 +19,7 @@ from game.game2048 import Game2048, Action
 @dataclass
 class Game2048EnvConfig:
     size: int = 4
-    obs_mode: ObsMode = "raw"               # raw / log2
+    obs_mode: ObsMode = "raw"               # raw / log2 / onehot
     reward_mode: RewardMode = "sum"         # sum / log2
     bonus_mode: BonusMode = "off"           # off / raw / log2
     step_reward: float = 0.0                # reward for each step
@@ -39,8 +39,12 @@ class Game2048Env(gym.Env):
 
         self.config = config or Game2048EnvConfig()
         self.game = Game2048(size=self.config.size)
+        
+        # max tile number for observation space(2^n for raw / n for log2 / [n + 1] for onehot)
+        # if > 24 and using raw, may need to use float64 to avoid overflow
+        self._max_num: float = 16.0
 
-        self._step_count = 0
+        self._step_count: int = 0
 
         # max tile record for bonus reward
         self.max_tile_seen: int = 4
@@ -64,18 +68,20 @@ class Game2048Env(gym.Env):
             # 0, 2, 4, 8, ...
             board_space = spaces.Box(
                 low=0,
-                high=2**16,
+                high=2**self._max_num,
+                shape=(size, size),
+                dtype=np.float32,
+            )
+        elif self.config.obs_mode == "log2" or self.config.obs_mode == "onehot":
+            # log2: 0, 1, 2, 3, ...
+            board_space = spaces.Box(
+                low=0.0,
+                high=self._max_num,
                 shape=(size, size),
                 dtype=np.float32,
             )
         else:
-            # log2: 0, 1, 2, 3, ...
-            board_space = spaces.Box(
-                low=0.0,
-                high=16.0,
-                shape=(size, size),
-                dtype=np.float32,
-            )
+            raise ValueError(f"Unsupported obs_mode: {self.config.obs_mode}")
 
         if self.config.use_action_mask:
             # Dict：{"board": board, "action_mask": mask}
@@ -101,12 +107,22 @@ class Game2048Env(gym.Env):
 
         if self.config.obs_mode == "raw":
             return board
+        elif self.config.obs_mode == "log2":
+            # log2 mode; 0 -> 0
+            non_zero = board > 0
+            board[non_zero] = np.log2(board[non_zero])
+            return board
+        elif self.config.obs_mode == "onehot":
+            non_zero = board > 0
+            exponents = np.zeros_like(board, dtype=np.int32)
+            exponents[non_zero] = np.log2(board[non_zero]).astype(np.int32)
+            max_exp = int(self._max_num)
+            num_channels = max_exp + 1
+            # trick: use np.eye to get onehot encoding
+            one_hot = np.eye(num_channels, dtype=np.float32)[exponents]
+            return one_hot
 
-        # log2 mode; 0 -> 0
-        non_zero = board > 0
-        board[non_zero] = np.log2(board[non_zero])
-        return board
-    
+
     
     def _get_action_mask(self) -> np.ndarray:
         mask_list = self.game.get_action_mask()         # list[int] of length 4

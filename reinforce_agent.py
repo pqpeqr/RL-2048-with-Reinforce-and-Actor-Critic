@@ -46,9 +46,7 @@ class ReinforceAgent:
 
         # get input_dim
         obs, info = self.env.reset(seed=0)
-        x, action_mask = encode_observation(
-            obs, self.mlp_config.use_onehot
-        )
+        x, action_mask = encode_observation(obs)
         input_dim = x.shape[0]
         n_actions = self.env.action_space.n
         
@@ -86,7 +84,7 @@ class ReinforceAgent:
         If `action_fn` is provided, use it to select the final action,
         bypassing the model's action-selection logic.
         '''
-        x, action_mask = encode_observation(obs, self.mlp_config.use_onehot)
+        x, action_mask = encode_observation(obs)
 
         logits, activations, pre_activations = forward_logits(
             self.params,
@@ -310,7 +308,7 @@ class ReinforceAgent:
             for obs, action, adv, probs in zip(
                 obs_list, action_list, advantages, probs_list
             ):
-                x, _ = encode_observation(obs, self.mlp_config.use_onehot)
+                x, _ = encode_observation(obs)
 
                 dW_list, db_list = self._policy_gradient_step(
                     x=x,
