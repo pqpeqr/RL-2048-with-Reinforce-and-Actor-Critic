@@ -306,18 +306,26 @@ class ReinforceAgent:
                 for l in range(len(grad_W_list)):
                     grad_W_list[l] += dW_list[l]
                     grad_b_list[l] += db_list[l]
+                    
+                total_steps += 1
+        
+        if total_steps > 0:
+            for l in range(len(grad_W_list)):
+                grad_W_list[l] /= total_steps
+                grad_b_list[l] /= total_steps
+
                 
         # logging for gradient norms
         if self._logger.isEnabledFor(logging.INFO):
-            step_grad_W_norms = [np.linalg.norm(dW_l) for dW_l in dW_list]
-            step_grad_b_norms = [np.linalg.norm(db_l) for db_l in db_list]
+            batch_grad_W_norms = [np.linalg.norm(gW) for gW in grad_W_list]
+            batch_grad_b_norms = [np.linalg.norm(gb) for gb in grad_b_list]
             
-            step_grad_W_norms_str = ", ".join(f"{n:.6f}" for n in step_grad_W_norms)
-            step_grad_b_norms_str = ", ".join(f"{n:.6f}" for n in step_grad_b_norms)
+            batch_grad_W_norms_str = ", ".join(f"{n:.6f}" for n in batch_grad_W_norms)
+            batch_grad_b_norms_str = ", ".join(f"{n:.6f}" for n in batch_grad_b_norms)
 
             self._logger.info(
-                f"Step grad_W norms: [{step_grad_W_norms_str}], "
-                f"grad_b norms: [{step_grad_b_norms_str}]"
+                f"Step grad_W norms: [{batch_grad_W_norms_str}], "
+                f"grad_b norms: [{batch_grad_b_norms_str}]"
             )
 
 
