@@ -50,6 +50,7 @@ class ReinforceAgent:
         input_dim = x.shape[0]
         n_actions = self.env.action_space.n
         
+        # initialize model parameters
         if initial_params_path is None:
             self.params = init_model_params(input_dim,
                                             self.mlp_config.hidden_sizes,
@@ -78,7 +79,7 @@ class ReinforceAgent:
         obs, 
         rng: np.random.Generator, 
         action_fn: Callable[[Any, np.ndarray | None], int] | None = None,
-    ) -> tuple[int, np.ndarray]:
+    ) -> tuple[int, np.ndarray, list[np.ndarray], list[np.ndarray]]:
         '''
         Given observation, select action according to policy.
         If `action_fn` is provided, use it to select the final action,
@@ -131,14 +132,14 @@ class ReinforceAgent:
                 f"Selected action:{action} from policy."
             )
 
-        return action, probs
+        return action, probs, activations, pre_activations
 
 
     def run_episode(
         self, 
         env_seed: int, 
         policy_seed: int,
-        action_gen: Iterator[int] | None = None,
+        action_gen: Callable[[Any, np.ndarray | None], int] | None = None,
         ) -> dict[str | Any]:
         '''
         Run one episode, return trajectory dict
@@ -153,12 +154,14 @@ class ReinforceAgent:
         action_list: list[int] = []
         reward_list: list[float] = []
         probs_list: list[np.ndarray] = []
+        activations_list: list[list[np.ndarray]] = []
+        pre_activations_list: list[list[np.ndarray]] = []
 
         done = False
         total_reward = 0.0
 
         while not done:
-            action, probs = self.select_action(obs, policy_rng, action_gen)
+            action, probs, activations, pre_activations = self.select_action(obs, policy_rng, action_gen)
 
             next_obs, reward, terminated, truncated, info = self.env.step(action)
             
@@ -168,24 +171,30 @@ class ReinforceAgent:
             action_list.append(action)
             reward_list.append(reward)
             probs_list.append(probs)
+            activations_list.append(activations)
+            pre_activations_list.append(pre_activations)
 
             total_reward += reward
             obs = next_obs
             done = terminated or truncated
         
         max_tile = self.env.max_tile_seen
+        end_state = self.env.render(mode="ansi")
 
         trajectory = {
             "obs": obs_list,
             "actions": action_list,
             "rewards": reward_list,
             "probs": probs_list,
+            "activations": activations_list,
+            "pre_activations": pre_activations_list,
             "total_reward": total_reward,
+            "end_state": end_state,
             "max_tile": max_tile,
         }
         
         self._logger.verbose(f"Episode finished, total_reward={total_reward:.3f}, max_tile={max_tile}")
-        self._logger.verbose(f"ENDGAME STATE\n" + self.env.render(mode="ansi"))
+        self._logger.verbose(f"ENDGAME STATE\n" + end_state)
         
         return trajectory
 
@@ -248,7 +257,8 @@ class ReinforceAgent:
 
     def _policy_gradient_step(
         self,
-        x: np.ndarray,
+        activations: list[np.ndarray],
+        pre_activations: list[np.ndarray],
         action: int,
         probs: np.ndarray,
         advantage: float,
@@ -265,7 +275,8 @@ class ReinforceAgent:
 
         # grad b and W
         dW_list, db_list = self._backpropagation(
-            x=x.astype(np.float32),
+            activations=activations,
+            pre_activations=pre_activations,
             grad_logits=grad_logits,
         )
 
@@ -296,37 +307,42 @@ class ReinforceAgent:
         grad_b_list: list[np.ndarray] = [
             np.zeros_like(b_l, dtype=np.float32) for b_l in b_list
         ]
-
-        total_steps = 0
+        
+        n_traj = len(trajectories)
+        if n_traj == 0:
+            return
 
         # accumulate gradients
         for traj, advantages in zip(trajectories, advantages_list):
             obs_list = traj["obs"]
             action_list = traj["actions"]
             probs_list = traj["probs"]
+            activations_list = traj["activations"]
+            pre_activations_list = traj["pre_activations"]
+            
+            T = len(obs_list)
+            if T == 0:
+                continue
 
-            for obs, action, adv, probs in zip(
-                obs_list, action_list, advantages, probs_list
+            # average over all time steps then over all trajectories
+            episode_weight = 1.0 / (T * n_traj)
+            
+            for action, adv, probs, activations, pre_activations in zip(
+                action_list, advantages, probs_list, activations_list, pre_activations_list
             ):
-                x, _ = encode_observation(obs)
-
                 dW_list, db_list = self._policy_gradient_step(
-                    x=x,
+                    activations=activations,
+                    pre_activations=pre_activations,
                     action=action,
                     probs=probs,
                     advantage=float(adv),
                 )
 
                 for l in range(len(grad_W_list)):
-                    grad_W_list[l] += dW_list[l]
-                    grad_b_list[l] += db_list[l]
+                    grad_W_list[l] += episode_weight * dW_list[l]
+                    grad_b_list[l] += episode_weight * db_list[l]
                     
-                total_steps += 1
-        
-        if total_steps > 0:
-            for l in range(len(grad_W_list)):
-                grad_W_list[l] /= total_steps
-                grad_b_list[l] /= total_steps
+    
 
                 
         # logging for gradient norms
@@ -368,18 +384,14 @@ class ReinforceAgent:
         
     def _backpropagation(
         self,
-        x: np.ndarray,
+        activations: list[np.ndarray],
+        pre_activations: list[np.ndarray],
         grad_logits: np.ndarray,
     ) -> tuple[list[np.ndarray], list[np.ndarray]]:
         """
         Backpropagation through MLP to compute gradients of parameters
         """
-        logits, activations, pre_activations = forward_logits(
-            self.params,
-            x,
-            self.mlp_config.activation,
-        )
-
+                
         Ws: list[np.ndarray] = self.params["W"]
         bs: list[np.ndarray] = self.params["b"]
         num_layers = len(Ws)
