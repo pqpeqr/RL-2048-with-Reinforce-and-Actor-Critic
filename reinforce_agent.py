@@ -148,6 +148,8 @@ class ReinforceAgent:
         self._logger.verbose(f"Episode start: env_seed={env_seed}, policy_seed={policy_seed}")
         
         obs, info = self.env.reset(seed=env_seed)
+        
+        state = self.env.render(mode="ansi")
 
         policy_rng = np.random.default_rng(policy_seed)
 
@@ -157,6 +159,7 @@ class ReinforceAgent:
         probs_list: list[np.ndarray] = []
         activations_list: list[list[np.ndarray]] = []
         pre_activations_list: list[list[np.ndarray]] = []
+        states_list: list[str] = []
 
         done = False
         total_reward = 0.0
@@ -174,13 +177,14 @@ class ReinforceAgent:
             probs_list.append(probs)
             activations_list.append(activations)
             pre_activations_list.append(pre_activations)
+            states_list.append(state)
 
             total_reward += reward
             obs = next_obs
             done = terminated or truncated
+            state = self.env.render(mode="ansi")
         
         max_tile = self.env.max_tile_seen
-        end_state = self.env.render(mode="ansi")
 
         trajectory = {
             "obs": obs_list,
@@ -190,12 +194,12 @@ class ReinforceAgent:
             "activations": activations_list,
             "pre_activations": pre_activations_list,
             "total_reward": total_reward,
-            "end_state": end_state,
+            "states": states_list,
             "max_tile": max_tile,
         }
         
         self._logger.verbose(f"Episode finished, total_reward={total_reward:.3f}, max_tile={max_tile}")
-        self._logger.verbose(f"ENDGAME STATE\n" + end_state)
+        self._logger.verbose(f"ENDGAME STATE\n" + self.env.render(mode="ansi"))
         
         return trajectory
 
