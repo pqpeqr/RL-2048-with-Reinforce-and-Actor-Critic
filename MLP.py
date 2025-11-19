@@ -11,6 +11,7 @@ ActivationMode = Literal["Sigmoid", "ReLU", ]
 class MLPConfig:
     hidden_sizes: list[int] = field(default_factory=list)   # list of hidden layer sizes
     activation: ActivationMode = "Sigmoid"                  # "Sigmoid" / "ReLU"
+    init_distribution: str = "XavierNormal"                 # "XavierNormal" / "HeNormal" / "XavierUniform"
     
     @property
     def num_layers(self) -> int:
@@ -44,7 +45,8 @@ def init_model_params(
     input_dim: int, 
     hidden_sizes: list[int], 
     output_dim: int, 
-    rng: np.random.Generator
+    rng: np.random.Generator,
+    init_distribution: str = "normal",
 ) -> dict[str, Any]:
     '''
     Initialize model parameters for MLP
@@ -61,12 +63,35 @@ def init_model_params(
     Ws: list[np.ndarray] = []
     bs: list[np.ndarray] = []
     
-    for in_dim, out_dim in zip(layer_sizes[:-1], layer_sizes[1:]):
-        W = rng.standard_normal((in_dim, out_dim), dtype=np.float32) * 0.01
-        b = np.zeros((out_dim,), dtype=np.float32)
+    # normal init
+    if init_distribution == "XavierNormal":
+        for in_dim, out_dim in zip(layer_sizes[:-1], layer_sizes[1:]):
+            std = np.sqrt(2.0 / (in_dim + out_dim))
+            W = rng.normal(0.0, std, size=(in_dim, out_dim)).astype(np.float32)
+            b = np.zeros((out_dim,), dtype=np.float32)
         
-        Ws.append(W)
-        bs.append(b)
+            Ws.append(W)
+            bs.append(b)
+            
+    elif init_distribution == "HeNormal":
+        for in_dim, out_dim in zip(layer_sizes[:-1], layer_sizes[1:]):
+            std = np.sqrt(2.0 / in_dim)
+            W = rng.normal(0.0, std, size=(in_dim, out_dim)).astype(np.float32)
+            b = np.zeros((out_dim,), dtype=np.float32)
+        
+            Ws.append(W)
+            bs.append(b)
+    
+    elif init_distribution == "XavierUniform":
+        for in_dim, out_dim in zip(layer_sizes[:-1], layer_sizes[1:]):
+            limit = np.sqrt(6.0 / (in_dim + out_dim))
+            W = rng.uniform(-limit, limit, size=(in_dim, out_dim)).astype(np.float32)
+            b = np.zeros((out_dim,), dtype=np.float32)
+        
+            Ws.append(W)
+            bs.append(b)
+    else:
+        raise ValueError(f"Unsupported init_distribution: {init_distribution}")
     
     return {"W": Ws, "b": bs}
 

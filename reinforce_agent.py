@@ -56,7 +56,9 @@ class ReinforceAgent:
             self.params = init_model_params(input_dim,
                                             self.mlp_config.hidden_sizes,
                                             n_actions,
-                                            self.rng)
+                                            self.rng,
+                                            self.mlp_config.init_distribution,
+                                            )
         else:
             self.params = load_model_params(initial_params_path)
     
