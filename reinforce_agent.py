@@ -103,7 +103,7 @@ class ReinforceAgent:
 
         if action_fn is not None:
             try:
-                candidate = int(action_fn(obs, action_mask))
+                candidate = int(action_fn(self.env.state, action_mask))
             except Exception as e:
                 self._logger.exception(
                     f"action_fn raised an exception: {e}. Falling back to policy."
