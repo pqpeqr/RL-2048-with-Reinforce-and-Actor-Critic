@@ -23,6 +23,9 @@ class ReinforceAgentConfig:
     baseline_mode: BaselineMode = "off"         # "off" / "each" / "batch"
     model_seed: int = 0
     normalize_advantage: bool = False           # whether to normalize advantages to mean 0, std 1
+    # e.g., [1.0, 0.0] means training on bottom 50% reward episodes only
+    # [3.0, 2.0, 1.0, 1.0] means weighting bottom 25% episodes 3x, next 25% 2x, other 50% 1x
+    reward_rank_weights: list[float] | None = None
 
 
 
@@ -321,6 +324,8 @@ class ReinforceAgent:
 
         # A_t = G_t - baseline (depending on baseline_mode)
         advantages_list = self._compute_advantages(returns_list)
+        
+        episode_rank_weights = self._compute_episode_rank_weights(returns_list)
 
         W_list: list[np.ndarray] = self.params["W"]
         b_list: list[np.ndarray] = self.params["b"]
@@ -338,7 +343,7 @@ class ReinforceAgent:
             return
 
         # accumulate gradients
-        for traj, advantages in zip(trajectories, advantages_list):
+        for epi_idx, (traj, advantages) in enumerate(zip(trajectories, advantages_list)):
             obs_list = traj["obs"]
             action_list = traj["actions"]
             probs_list = traj["probs"]
@@ -350,7 +355,9 @@ class ReinforceAgent:
                 continue
 
             # average over all time steps then over all trajectories
-            episode_weight = 1.0 / (T * n_traj)
+            base_episode_weight = 1.0 / (T * n_traj)
+            rank_weight = float(episode_rank_weights[epi_idx])  # e.g. 3.0, 2.0, 1.0, 0.0 ...
+            episode_weight = base_episode_weight * rank_weight
             
             for action, adv, probs, activations, pre_activations in zip(
                 action_list, advantages, probs_list, activations_list, pre_activations_list
@@ -369,7 +376,7 @@ class ReinforceAgent:
                     
     
 
-                
+
         # logging for gradient norms
         if self._logger.isEnabledFor(logging.INFO):
             batch_grad_W_norms = [np.linalg.norm(gW) for gW in grad_W_list]
@@ -446,3 +453,42 @@ class ReinforceAgent:
                 delta = dz_prev
 
         return grad_W_list, grad_b_list
+
+
+    def _compute_episode_rank_weights(
+        self,
+        returns_list: list[np.ndarray],
+    ) -> np.ndarray:
+        """
+        Compute episode weights based on reward ranks and user-configured weights.
+        """
+        weights_conf = self.agent_config.reward_rank_weights
+        
+        n_traj = len(returns_list)
+        if n_traj == 0:
+            return np.array([], dtype=np.float32)
+        
+        # if no weights configured, return all ones
+        if weights_conf is None or len(weights_conf) == 0:
+            return np.ones(n_traj, dtype=np.float32)
+        
+        weights_conf = np.asarray(weights_conf, dtype=np.float32)
+        num_bins = len(weights_conf)
+        
+        total_returns = np.array(
+            [float(r.sum()) for r in returns_list],
+            dtype=np.float32,
+        )
+        
+        sorted_indices = np.argsort(total_returns)  # shape (n_traj,)
+        
+        episode_weights = np.zeros(n_traj, dtype=np.float32)
+        
+        for rank, epi_idx in enumerate(sorted_indices):
+            percent_rank = (rank + 0.5) / n_traj  # e.g., rank=0 ~ 0.5/n, rank=n-1 ~ (n-0.5)/n
+            bin_idx = int(percent_rank * num_bins)
+            if bin_idx >= num_bins:
+                bin_idx = num_bins - 1
+            episode_weights[epi_idx] = weights_conf[bin_idx]
+        
+        return episode_weights
