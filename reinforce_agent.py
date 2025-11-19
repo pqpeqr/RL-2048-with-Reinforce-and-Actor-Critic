@@ -22,6 +22,7 @@ class ReinforceAgentConfig:
     learning_rate: float = 1e-3                 # 
     baseline_mode: BaselineMode = "off"         # "off" / "each" / "batch"
     model_seed: int = 0
+    normalize_advantage: bool = False           # whether to normalize advantages to mean 0, std 1
 
 
 
@@ -234,25 +235,43 @@ class ReinforceAgent:
         mode = self.agent_config.baseline_mode
 
         if mode == "off":
-            return [r.astype(np.float32) for r in returns_list]
+            advantages_list: list[np.ndarray] = [
+                r.astype(np.float32) for r in returns_list
+            ]
 
-        elif mode == "each":
-            advantages_list: list[np.ndarray] = []
+        elif mode == "each":        
+            advantages_list = []
             for r in returns_list:
                 baseline = float(r.mean())
                 advantages = (r - baseline).astype(np.float32)
                 advantages_list.append(advantages)
-            return advantages_list
 
         elif mode == "batch":
             all_returns = np.concatenate(returns_list)
             baseline = float(all_returns.mean())
-
-            advantages_list = [(r - baseline).astype(np.float32) for r in returns_list]
-            return advantages_list
+            advantages_list = [
+                (r - baseline).astype(np.float32) for r in returns_list
+            ]
 
         else:
             raise ValueError(f"Unknown baseline mode: {mode}")
+        
+        # normalize advantages if enabled
+        if self.agent_config.normalize_advantage:
+            all_advantages = np.concatenate(advantages_list)
+            mean = float(all_advantages.mean())
+            std = float(all_advantages.std())
+            
+            eps = 1e-8 # to avoid division by zero
+            if std < eps:
+                std = eps
+
+            advantages_list = [
+                ((adv - mean) / std).astype(np.float32)
+                for adv in advantages_list
+            ]    
+        
+        return advantages_list
 
 
     def _policy_gradient_step(
