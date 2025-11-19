@@ -21,7 +21,9 @@ class Game2048EnvConfig:
     size: int = 4
     obs_mode: ObsMode = "raw"               # raw / log2 / onehot
     reward_mode: RewardMode = "sum"         # sum / log2
+    reward_scale: float = 1.0               # scale factor for reward
     bonus_mode: BonusMode = "off"           # off / raw / log2
+    bonus_scale: float = 1.0                # scale factor for bonus
     step_reward: float = 0.0                # reward for each step
     endgame_penalty: float = 0.0            # penalty at the end of game
     use_action_mask: bool = True            # T / F
@@ -195,6 +197,8 @@ class Game2048Env(gym.Env):
         else:
             raise ValueError(f"Unsupported reward mode: {cfg.reward_mode}")
         
+        reward *= cfg.reward_scale
+        
         # bonus reward
         bonus = 0.0
         max_merged = max(merged, default=0)
@@ -209,7 +213,8 @@ class Game2048Env(gym.Env):
             else:
                 raise ValueError(f"Unsupported bonus mode: {cfg.bonus_mode}")
             self.max_tile_seen = max_merged
-        reward += bonus
+            bonus *= cfg.bonus_scale
+            reward += bonus
         
         # step reward
         reward += cfg.step_reward
