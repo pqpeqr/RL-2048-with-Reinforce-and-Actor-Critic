@@ -60,6 +60,11 @@ class Game2048Env(gym.Env):
         # Gym spaces
         self.action_space = spaces.Discrete(4)  # 0: up, 1: right, 2: down, 3: left
         self.observation_space = self._build_observation_space()
+    
+    
+    @property
+    def state(self) -> list[list[int]]:
+        return self.game.state
 
     
     def _build_observation_space(self) -> spaces.Space:
