@@ -55,6 +55,7 @@ class Game2048:
 
         if is_changed:
             self._spawn()
+            is_done = self._is_done()
 
         self._logger.debug(
             f"step={self.step_count}, "
