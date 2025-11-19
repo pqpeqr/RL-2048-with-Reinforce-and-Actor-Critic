@@ -122,7 +122,7 @@ class ReinforceAgent:
                     )
                 else:
                     action = candidate
-                    self._logger.warning(
+                    self._logger.debug(
                         f"Selected action:{action} from action_fn."
                     )
         
