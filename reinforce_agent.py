@@ -21,9 +21,8 @@ OptimizerType = Literal["sgd", "adam"]
 class ReinforceAgentConfig:
     gamma: float = 1                            # [0, 1]
     learning_rate: float = 1e-3                 # 
-    baseline_mode: BaselineMode = "off"         # "off" / "each" / "batch"
+    baseline_mode: BaselineMode = "off"         # "off" / "each" / "batch" / "batch_norm"
     model_seed: int = 0
-    normalize_advantage: bool = False           # whether to normalize advantages to mean 0, std 1
     # e.g., [1.0, 0.0] means training on bottom 50% reward episodes only
     # [3.0, 2.0, 1.0, 1.0] means weighting bottom 25% episodes 3x, next 25% 2x, other 50% 1x
     reward_rank_weights: list[float] | None = None
@@ -31,7 +30,6 @@ class ReinforceAgentConfig:
     optimizer: OptimizerType = "sgd"
     adam_beta1: float = 0.9
     adam_beta2: float = 0.999
-    adam_eps: float = 1e-8
 
 
 
@@ -95,6 +93,10 @@ class ReinforceAgent:
         Load model parameters from npz file
         '''
         self.params = load_model_params(file_path)
+        
+        self.mlp_config.hidden_sizes = [W.shape[1] for W in self.params["W"][:-1]]
+        
+        self._logger.info(f"Model parameters loaded from {file_path}")
     
     
     def save_model(self, file_path: str | None = "params.npz") -> None:
@@ -264,6 +266,7 @@ class ReinforceAgent:
         - "off"  : advantage = returns
         - "each" : baseline by episode, advantage = returns - mean(returns)
         - "batch": baseline by batch, advantage = returns - mean(all returns in batch)
+        - "batch_norm": baseline by batch, normalized advantage = (returns - mean) / std
         """
         mode = self.agent_config.baseline_mode
 
@@ -286,23 +289,20 @@ class ReinforceAgent:
                 (r - baseline).astype(np.float32) for r in returns_list
             ]
 
-        else:
-            raise ValueError(f"Unknown baseline mode: {mode}")
-        
-        # normalize advantages if enabled
-        if self.agent_config.normalize_advantage:
-            all_advantages = np.concatenate(advantages_list)
-            mean = float(all_advantages.mean())
-            std = float(all_advantages.std())
-            
+        elif mode == "batch_norm":
+            all_returns = np.concatenate(returns_list)
+            mean = float(all_returns.mean())
+            std = float(all_returns.std())
             eps = 1e-8 # to avoid division by zero
             if std < eps:
                 std = eps
-
             advantages_list = [
-                ((adv - mean) / std).astype(np.float32)
-                for adv in advantages_list
-            ]    
+                ((r - mean) / std).astype(np.float32)
+                for r in returns_list
+            ]
+            
+        else:
+            raise ValueError(f"Unknown baseline mode: {mode}") 
         
         return advantages_list
 
@@ -536,7 +536,7 @@ class ReinforceAgent:
         lr = self.agent_config.learning_rate
         beta1 = self.agent_config.adam_beta1
         beta2 = self.agent_config.adam_beta2
-        eps = self.agent_config.adam_eps
+        eps = 1e-8
 
         self._adam_t += 1
         t = self._adam_t
