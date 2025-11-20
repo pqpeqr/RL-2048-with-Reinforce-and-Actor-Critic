@@ -15,6 +15,7 @@ from MLP import *
 
 
 BaselineMode = Literal["off", "each", "batch"]
+OptimizerType = Literal["sgd", "adam"]
 
 @dataclass
 class ReinforceAgentConfig:
@@ -26,6 +27,11 @@ class ReinforceAgentConfig:
     # e.g., [1.0, 0.0] means training on bottom 50% reward episodes only
     # [3.0, 2.0, 1.0, 1.0] means weighting bottom 25% episodes 3x, next 25% 2x, other 50% 1x
     reward_rank_weights: list[float] | None = None
+    
+    optimizer: OptimizerType = "sgd"
+    adam_beta1: float = 0.9
+    adam_beta2: float = 0.999
+    adam_eps: float = 1e-8
 
 
 
@@ -64,6 +70,24 @@ class ReinforceAgent:
                                             )
         else:
             self.params = load_model_params(initial_params_path)
+            
+        # Adam
+        W_list: list[np.ndarray] = self.params["W"]
+        b_list: list[np.ndarray] = self.params["b"]
+        
+        self._adam_m_W: list[np.ndarray] = [
+            np.zeros_like(W, dtype=np.float32) for W in W_list
+        ]
+        self._adam_v_W: list[np.ndarray] = [
+            np.zeros_like(W, dtype=np.float32) for W in W_list
+        ]
+        self._adam_m_B: list[np.ndarray] = [
+            np.zeros_like(b, dtype=np.float32) for b in b_list
+        ]
+        self._adam_v_B: list[np.ndarray] = [
+            np.zeros_like(b, dtype=np.float32) for b in b_list
+        ]
+        self._adam_t: int = 0
     
     
     def load_model(self, file_path: str | None = "params.npz") -> None:
@@ -392,10 +416,17 @@ class ReinforceAgent:
 
 
         # update parameters (gradient ascent)
-        lr = self.agent_config.learning_rate
-        for l in range(len(W_list)):
-            self.params["W"][l] = W_list[l] + lr * grad_W_list[l]
-            self.params["b"][l] = b_list[l] + lr * grad_b_list[l]
+        if self.agent_config.optimizer == "sgd":
+            lr = self.agent_config.learning_rate
+            for l in range(len(W_list)):
+                self.params["W"][l] = W_list[l] + lr * grad_W_list[l]
+                self.params["b"][l] = b_list[l] + lr * grad_b_list[l]
+
+        elif self.agent_config.optimizer == "adam":
+            self._adam_update(grad_W_list, grad_b_list)
+
+        else:
+            raise ValueError(f"Unknown optimizer: {self.agent_config.optimizer}")
             
             
             
@@ -492,3 +523,39 @@ class ReinforceAgent:
             episode_weights[epi_idx] = weights_conf[bin_idx]
         
         return episode_weights
+
+
+    def _adam_update(
+        self,
+        grad_W_list: list[np.ndarray],
+        grad_b_list: list[np.ndarray],
+    ) -> None:
+        """
+        Update model parameters using Adam optimizer
+        """
+        lr = self.agent_config.learning_rate
+        beta1 = self.agent_config.adam_beta1
+        beta2 = self.agent_config.adam_beta2
+        eps = self.agent_config.adam_eps
+
+        self._adam_t += 1
+        t = self._adam_t
+
+        for l in range(len(self.params["W"])):
+            gW = grad_W_list[l]
+            gb = grad_b_list[l]
+
+            self._adam_m_W[l] = beta1 * self._adam_m_W[l] + (1.0 - beta1) * gW
+            self._adam_m_B[l] = beta1 * self._adam_m_B[l] + (1.0 - beta1) * gb
+
+            self._adam_v_W[l] = beta2 * self._adam_v_W[l] + (1.0 - beta2) * (gW * gW)
+            self._adam_v_B[l] = beta2 * self._adam_v_B[l] + (1.0 - beta2) * (gb * gb)
+
+            # bias correction
+            mW_hat = self._adam_m_W[l] / (1.0 - beta1 ** t)
+            mB_hat = self._adam_m_B[l] / (1.0 - beta1 ** t)
+            vW_hat = self._adam_v_W[l] / (1.0 - beta2 ** t)
+            vB_hat = self._adam_v_B[l] / (1.0 - beta2 ** t)
+
+            self.params["W"][l] = self.params["W"][l] + lr * mW_hat / (np.sqrt(vW_hat) + eps)
+            self.params["b"][l] = self.params["b"][l] + lr * mB_hat / (np.sqrt(vB_hat) + eps)
