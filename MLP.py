@@ -11,7 +11,7 @@ ActivationMode = Literal["Sigmoid", "ReLU", ]
 class MLPConfig:
     hidden_sizes: list[int] = field(default_factory=list)   # list of hidden layer sizes
     activation: ActivationMode = "Sigmoid"                  # "Sigmoid" / "ReLU"
-    init_distribution: str = "XavierNormal"                 # "XavierNormal" / "HeNormal" / "XavierUniform"
+    init_distribution: str = "XavierNormal"                 # "XavierNormal" / "HeNormal" / "XavierUniform" / "Normal"
     
     @property
     def num_layers(self) -> int:
@@ -88,6 +88,14 @@ def init_model_params(
             W = rng.uniform(-limit, limit, size=(in_dim, out_dim)).astype(np.float32)
             b = np.zeros((out_dim,), dtype=np.float32)
         
+            Ws.append(W)
+            bs.append(b)
+            
+    elif init_distribution == "Normal":
+        for in_dim, out_dim in zip(layer_sizes[:-1], layer_sizes[1:]):
+            W = rng.standard_normal((in_dim, out_dim), dtype=np.float32) * 0.01
+            b = np.zeros((out_dim,), dtype=np.float32)
+            
             Ws.append(W)
             bs.append(b)
     else:
