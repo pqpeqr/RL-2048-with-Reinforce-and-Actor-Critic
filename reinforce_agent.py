@@ -111,6 +111,7 @@ class ReinforceAgent:
         obs, 
         rng: np.random.Generator, 
         action_fn: Callable[[Any, np.ndarray | None], int] | None = None,
+        use_greedy: bool = False,
     ) -> tuple[int, np.ndarray, list[np.ndarray], list[np.ndarray]]:
         '''
         Given observation, select action according to policy.
@@ -158,11 +159,18 @@ class ReinforceAgent:
                     )
         
         if action is None:
-            action = int(rng.choice(len(probs), p=probs))
-
-            self._logger.debug(
-                f"Selected action:{action} from policy."
-            )
+            if use_greedy:
+                if action_mask is not None:
+                    probs = probs * action_mask
+                action = int(np.argmax(probs))
+                self._logger.debug(
+                    f"Selected action (greedy argmax): {action}"
+                )
+            else:
+                action = int(rng.choice(len(probs), p=probs))
+                self._logger.debug(
+                    f"Selected action:{action} from policy."
+                )
 
         return action, probs, activations, pre_activations
 
@@ -172,6 +180,7 @@ class ReinforceAgent:
         env_seed: int, 
         policy_seed: int,
         action_gen: Callable[[Any, np.ndarray | None], int] | None = None,
+        use_greedy: bool = False,   # if True, select action with argmax
         ) -> dict[str | Any]:
         '''
         Run one episode, return trajectory dict
@@ -196,7 +205,7 @@ class ReinforceAgent:
         total_reward = 0.0
 
         while not done:
-            action, probs, activations, pre_activations = self.select_action(obs, policy_rng, action_gen)
+            action, probs, activations, pre_activations = self.select_action(obs, policy_rng, action_gen, use_greedy=use_greedy)
 
             next_obs, reward, terminated, truncated, info = self.env.step(action)
             
@@ -559,3 +568,4 @@ class ReinforceAgent:
 
             self.params["W"][l] = self.params["W"][l] + lr * mW_hat / (np.sqrt(vW_hat) + eps)
             self.params["b"][l] = self.params["b"][l] + lr * mB_hat / (np.sqrt(vB_hat) + eps)
+
