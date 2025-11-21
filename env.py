@@ -20,6 +20,7 @@ from game.game2048 import Game2048, Action
 class Game2048EnvConfig:
     size: int = 4
     obs_mode: ObsMode = "raw"               # raw / log2 / onehot
+    obs_log2_scale: float = 1.0             # scale factor for log2 observation
     reward_mode: RewardMode = "sum"         # sum / log2
     reward_scale: float = 1.0               # scale factor for reward
     bonus_mode: BonusMode = "off"           # off / raw / log2
@@ -118,6 +119,7 @@ class Game2048Env(gym.Env):
             # log2 mode; 0 -> 0
             non_zero = board > 0
             board[non_zero] = np.log2(board[non_zero])
+            board *= self.config.obs_log2_scale
             return board
         elif self.config.obs_mode == "onehot":
             non_zero = board > 0
