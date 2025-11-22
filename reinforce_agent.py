@@ -65,6 +65,7 @@ class ReinforceAgent:
                                             n_actions,
                                             self.rng,
                                             self.mlp_config.init_distribution,
+                                            self.mlp_config.last_init_normal
                                             )
         else:
             self.params = load_model_params(initial_params_path)

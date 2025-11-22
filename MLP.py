@@ -12,6 +12,7 @@ class MLPConfig:
     hidden_sizes: list[int] = field(default_factory=list)   # list of hidden layer sizes
     activation: ActivationMode = "Sigmoid"                  # "Sigmoid" / "ReLU"
     init_distribution: str = "XavierNormal"                 # "XavierNormal" / "HeNormal" / "XavierUniform" / "Normal"
+    last_init_normal: bool = True                           # whether to use normal init for last layer
     
     @property
     def num_layers(self) -> int:
@@ -47,6 +48,7 @@ def init_model_params(
     output_dim: int, 
     rng: np.random.Generator,
     init_distribution: str = "normal",
+    last_init_normal: bool = True,
 ) -> dict[str, Any]:
     '''
     Initialize model parameters for MLP
@@ -63,44 +65,32 @@ def init_model_params(
     Ws: list[np.ndarray] = []
     bs: list[np.ndarray] = []
     
-    # normal init
-    if init_distribution == "XavierNormal":
-        for in_dim, out_dim in zip(layer_sizes[:-1], layer_sizes[1:]):
-            std = np.sqrt(2.0 / (in_dim + out_dim))
-            W = rng.normal(0.0, std, size=(in_dim, out_dim)).astype(np.float32)
-            b = np.zeros((out_dim,), dtype=np.float32)
-        
-            Ws.append(W)
-            bs.append(b)
-            
-    elif init_distribution == "HeNormal":
-        for in_dim, out_dim in zip(layer_sizes[:-1], layer_sizes[1:]):
-            std = np.sqrt(2.0 / in_dim)
-            W = rng.normal(0.0, std, size=(in_dim, out_dim)).astype(np.float32)
-            b = np.zeros((out_dim,), dtype=np.float32)
-        
-            Ws.append(W)
-            bs.append(b)
-    
-    elif init_distribution == "XavierUniform":
-        for in_dim, out_dim in zip(layer_sizes[:-1], layer_sizes[1:]):
-            limit = np.sqrt(6.0 / (in_dim + out_dim))
-            W = rng.uniform(-limit, limit, size=(in_dim, out_dim)).astype(np.float32)
-            b = np.zeros((out_dim,), dtype=np.float32)
-        
-            Ws.append(W)
-            bs.append(b)
-            
-    elif init_distribution == "Normal":
-        for in_dim, out_dim in zip(layer_sizes[:-1], layer_sizes[1:]):
+    for i, (in_dim, out_dim) in enumerate(zip(layer_sizes[:-1], layer_sizes[1:])):
+        if last_init_normal and (i == len(layer_sizes) - 1):
+            # last layer with normal init
             W = rng.standard_normal((in_dim, out_dim), dtype=np.float32) * 0.01
             b = np.zeros((out_dim,), dtype=np.float32)
-            
-            Ws.append(W)
-            bs.append(b)
-    else:
-        raise ValueError(f"Unsupported init_distribution: {init_distribution}")
-    
+
+        if init_distribution == "XavierNormal":
+                std = np.sqrt(2.0 / (in_dim + out_dim))
+                W = rng.normal(0.0, std, size=(in_dim, out_dim)).astype(np.float32)
+                b = np.zeros((out_dim,), dtype=np.float32)
+        elif init_distribution == "HeNormal":
+                std = np.sqrt(2.0 / in_dim)
+                W = rng.normal(0.0, std, size=(in_dim, out_dim)).astype(np.float32)
+                b = np.zeros((out_dim,), dtype=np.float32)
+        elif init_distribution == "XavierUniform":
+                limit = np.sqrt(6.0 / (in_dim + out_dim))
+                W = rng.uniform(-limit, limit, size=(in_dim, out_dim)).astype(np.float32)
+                b = np.zeros((out_dim,), dtype=np.float32)
+        elif init_distribution == "Normal":
+                W = rng.standard_normal((in_dim, out_dim), dtype=np.float32) * 0.01
+                b = np.zeros((out_dim,), dtype=np.float32)
+        else:
+            raise ValueError(f"Unsupported init_distribution: {init_distribution}")
+        Ws.append(W)
+        bs.append(b)
+        
     return {"W": Ws, "b": bs}
 
 
