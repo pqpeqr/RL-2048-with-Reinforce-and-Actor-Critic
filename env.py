@@ -313,3 +313,86 @@ class Game2048Env(gym.Env):
             raise NotImplementedError(f"Unsupported render mode: {mode}")
     
     
+    
+    @staticmethod
+    def get_symmetries(
+        obs: dict[str, np.ndarray] | np.ndarray, 
+        action: Action,
+        ) -> list[tuple[dict[str, np.ndarray] | np.ndarray, Action]]:
+        '''
+        Get all symmetric observations, actions, and others (e.g. rewards)
+        
+        '''
+        
+        def rotate_action_ccw90(action: int) -> int:
+            # 0->3, 1->0, 2->1, 3->2
+            return (action - 1) % 4
+        
+        def flip_action_horiz(action: int) -> int:
+            # 0->0, 1->3, 2->2, 3->1
+            if action == 1:
+                return 3
+            elif action == 3:
+                return 1
+            else:
+                return action
+            
+        symmetries = []
+        
+        if isinstance(obs, dict):
+            board = obs["board"]
+            action_mask = obs["action_mask"]
+        else:
+            board = obs
+            action_mask = None
+        
+        rot_axes = (0, 1)   # suitable for onehot
+        
+        curr_board = board.copy()
+        curr_action = action
+        curr_mask = action_mask.copy() if action_mask is not None else None
+        
+        # 4 rotations
+        for _ in range(4):
+            if curr_mask is not None:
+                symmetries.append(
+                    (
+                        {
+                            "board": curr_board,
+                            "action_mask": curr_mask,
+                        },
+                        curr_action,
+                    )
+                )
+            else:
+                symmetries.append((curr_board, curr_action))
+            # rotate
+            curr_board = np.rot90(curr_board, k=1, axes=rot_axes)
+            curr_action = rotate_action_ccw90(curr_action)
+            curr_mask = np.roll(curr_mask, shift=-1) if curr_mask is not None else None
+            
+        # flip
+        curr_board = np.fliplr(board.copy())
+        curr_action = flip_action_horiz(action)
+        curr_mask = action_mask[[0, 3, 2, 1]] if action_mask is not None else None
+        
+        # 4 rotations of flipped
+        for _ in range(4):
+            if curr_mask is not None:
+                symmetries.append(
+                    (
+                        {
+                            "board": curr_board,
+                            "action_mask": curr_mask,
+                        },
+                        curr_action,
+                    )
+                )
+            else:
+                symmetries.append((curr_board, curr_action))
+            # rotate
+            curr_board = np.rot90(curr_board, k=1, axes=rot_axes)
+            curr_action = rotate_action_ccw90(curr_action)
+            curr_mask = np.roll(curr_mask, shift=-1) if curr_mask is not None else None
+            
+        return symmetries

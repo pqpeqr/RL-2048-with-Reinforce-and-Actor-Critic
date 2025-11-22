@@ -136,11 +136,10 @@ def _apply_activation(x: np.ndarray, mode: ActivationMode) -> np.ndarray:
         raise ValueError(f"Unsupported activation: {mode}")
 
 
-
-
-def logits_to_probs(logits, action_mask = None) -> np.ndarray:
+def logits_to_probs(logits: np.ndarray, action_mask: np.ndarray | None = None) -> np.ndarray:
     '''
-    Convert logits to action probabilities using softmax
+    Convert logits to action probabilities using softmax.
+    Supports both 1D input (n_actions,) and 2D batch input (batch_size, n_actions).
     '''
     if action_mask is not None:
         mask = action_mask.astype(bool)
@@ -148,9 +147,12 @@ def logits_to_probs(logits, action_mask = None) -> np.ndarray:
 
     # softmax with numerically stable
     # The Log-Sum-Exp Trick
-    max_logit = np.max(logits)
+    max_logit = np.max(logits, axis=-1, keepdims=True)
     exps = np.exp(logits - max_logit)
-    probs = exps / np.sum(exps)
+    
+    sum_exps = np.sum(exps, axis=-1, keepdims=True)
+    probs = exps / sum_exps
+    
     return probs
 
 

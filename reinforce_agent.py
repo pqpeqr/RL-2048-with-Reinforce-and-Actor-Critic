@@ -30,6 +30,8 @@ class ReinforceAgentConfig:
     optimizer: OptimizerType = "sgd"
     adam_beta1: float = 0.9
     adam_beta2: float = 0.999
+    
+    augmentation: bool = False                  # whether to use data augmentation (symmetries)
 
 
 
@@ -197,16 +199,13 @@ class ReinforceAgent:
         obs_list: list[Any] = []
         action_list: list[int] = []
         reward_list: list[float] = []
-        probs_list: list[np.ndarray] = []
-        activations_list: list[list[np.ndarray]] = []
-        pre_activations_list: list[list[np.ndarray]] = []
         states_list: list[str] = []
 
         done = False
         total_reward = 0.0
 
         while not done:
-            action, probs, activations, pre_activations = self.select_action(obs, policy_rng, action_gen, use_greedy=use_greedy)
+            action, _, _, _ = self.select_action(obs, policy_rng, action_gen, use_greedy=use_greedy)
 
             next_obs, reward, terminated, truncated, info = self.env.step(action)
             
@@ -215,9 +214,6 @@ class ReinforceAgent:
             obs_list.append(obs)
             action_list.append(action)
             reward_list.append(reward)
-            probs_list.append(probs)
-            activations_list.append(activations)
-            pre_activations_list.append(pre_activations)
             states_list.append(state)
 
             total_reward += reward
@@ -231,9 +227,6 @@ class ReinforceAgent:
             "obs": obs_list,
             "actions": action_list,
             "rewards": reward_list,
-            "probs": probs_list,
-            "activations": activations_list,
-            "pre_activations": pre_activations_list,
             "total_reward": total_reward,
             "states": states_list,
             "max_tile": max_tile,
@@ -269,6 +262,7 @@ class ReinforceAgent:
     def _compute_advantages(
         self,
         returns_list: list[np.ndarray],
+        episode_rank_weights: np.ndarray,
     ) -> list[np.ndarray]:
         """
         A_t = G_t - baseline (depending on baseline_mode). 
@@ -293,24 +287,47 @@ class ReinforceAgent:
                 advantages_list.append(advantages)
 
         elif mode == "batch":
+            # for CVaR-like weighting
             all_returns = np.concatenate(returns_list)
-            baseline = float(all_returns.mean())
+            weights_expanded = []
+            for i, r in enumerate(returns_list):
+                weights_expanded.append(np.full(len(r), episode_rank_weights[i]))
+            weights_flat = np.concatenate(weights_expanded)
+            sum_weights = np.sum(weights_flat)
+            if sum_weights > 1e-8:
+                baseline = np.sum(weights_flat * all_returns) / sum_weights
+            else:
+                baseline = 0.0
+
             advantages_list = [
                 (r - baseline).astype(np.float32) for r in returns_list
             ]
 
         elif mode == "batch_norm":
             all_returns = np.concatenate(returns_list)
-            mean = float(all_returns.mean())
-            std = float(all_returns.std())
-            eps = 1e-8 # to avoid division by zero
-            if std < eps:
-                std = eps
+            
+            weights_expanded = []
+            for i, r in enumerate(returns_list):
+                weights_expanded.append(np.full(len(r), episode_rank_weights[i]))
+            weights_flat = np.concatenate(weights_expanded)
+            # Weighted Mean = Sum(W * R) / Sum(W)
+            sum_weights = np.sum(weights_flat)
+            if sum_weights > 1e-8:
+                mean = np.sum(weights_flat * all_returns) / sum_weights
+                # Weighted Variance = Sum(W * (R - mean)^2) / Sum(W)
+                var = np.sum(weights_flat * (all_returns - mean)**2) / sum_weights
+                std = np.sqrt(var)
+            else:
+                mean = 0.0
+                std = 1.0
+                
+            eps = 1e-8
+            if std < eps: std = eps
+            
             advantages_list = [
                 ((r - mean) / std).astype(np.float32)
                 for r in returns_list
             ]
-            
         else:
             raise ValueError(f"Unknown baseline mode: {mode}") 
         
@@ -351,20 +368,29 @@ class ReinforceAgent:
         '''
         # 
         returns_list: list[np.ndarray] = []
+        total_reward_list : list[float] = []
         for traj in trajectories:
-            rewards = traj["rewards"]
-            returns = self.compute_returns(rewards)
+            returns = self.compute_returns(traj["rewards"])
             returns_list.append(returns)
+            total_reward_list.append(traj["total_reward"])
+        
+        episode_rank_weights = self._compute_episode_rank_weights(total_reward_list)
 
         # A_t = G_t - baseline (depending on baseline_mode)
-        advantages_list = self._compute_advantages(returns_list)
+        advantages_list = self._compute_advantages(returns_list, episode_rank_weights)
         
-        episode_rank_weights = self._compute_episode_rank_weights(returns_list)
-
+        # augmentation
+        if self.agent_config.augmentation:
+            trajectories, advantages_list, episode_rank_weights = self._augment_trajectories(
+                trajectories, 
+                advantages_list, 
+                episode_rank_weights
+            )
+            
+        # initialize gradients
         W_list: list[np.ndarray] = self.params["W"]
         b_list: list[np.ndarray] = self.params["b"]
-
-        # initialize gradients
+        
         grad_W_list: list[np.ndarray] = [
             np.zeros_like(W_l, dtype=np.float32) for W_l in W_list
         ]
@@ -377,40 +403,62 @@ class ReinforceAgent:
             return
 
         # accumulate gradients
-        for epi_idx, (traj, advantages) in enumerate(zip(trajectories, advantages_list)):
+        for traj, advantages, episode_rank_weight in zip(trajectories, advantages_list, episode_rank_weights):
             obs_list = traj["obs"]
             action_list = traj["actions"]
-            probs_list = traj["probs"]
-            activations_list = traj["activations"]
-            pre_activations_list = traj["pre_activations"]
+            # probs_list = traj["probs"]
+            # activations_list = traj["activations"]
+            # pre_activations_list = traj["pre_activations"]
             
             T = len(obs_list)
             if T == 0:
                 continue
+            
+            x_list = []
+            mask_list = []
+            
+            for o in obs_list:
+                x, mask = encode_observation(o) 
+                x_list.append(x)
+                mask_list.append(mask)
+            
+            X_batch = np.array(x_list)        # Shape: (T, Input_Dim)
+            mask_batch = np.array(mask_list)  # Shape: (T, N_Actions)
+            
+            logits_batch, activations_batch, pre_activations_batch = forward_logits(
+                self.params,
+                X_batch,
+                self.mlp_config.activation,
+            )
+            
+            probs_batch = logits_to_probs(logits_batch, mask_batch)
 
             # average over all time steps then over all trajectories
             base_episode_weight = 1.0 / (T * n_traj)
-            rank_weight = float(episode_rank_weights[epi_idx])  # e.g. 3.0, 2.0, 1.0, 0.0 ...
-            episode_weight = base_episode_weight * rank_weight
+            weight = base_episode_weight * float(episode_rank_weight)
             
-            for action, adv, probs, activations, pre_activations in zip(
-                action_list, advantages, probs_list, activations_list, pre_activations_list
-            ):
-                dW_list, db_list = self._policy_gradient_step(
-                    activations=activations,
-                    pre_activations=pre_activations,
+            for t in range(T):
+                action = action_list[t]
+                adv = float(advantages[t])
+                
+                probs = probs_batch[t]
+                
+                act_t = [layer[t] for layer in activations_batch]
+                pre_act_t = [layer[t] for layer in pre_activations_batch]
+                
+                dW_t, db_t = self._policy_gradient_step(
+                    activations=act_t,
+                    pre_activations=pre_act_t,
                     action=action,
                     probs=probs,
-                    advantage=float(adv),
+                    advantage=adv
                 )
-
+                
                 for l in range(len(grad_W_list)):
-                    grad_W_list[l] += episode_weight * dW_list[l]
-                    grad_b_list[l] += episode_weight * db_list[l]
-                    
-    
-
-
+                    grad_W_list[l] += weight * dW_t[l]
+                    grad_b_list[l] += weight * db_t[l]
+            
+            
         # logging for gradient norms
         if self._logger.isEnabledFor(logging.INFO):
             batch_grad_W_norms = [np.linalg.norm(gW) for gW in grad_W_list]
@@ -498,14 +546,14 @@ class ReinforceAgent:
 
     def _compute_episode_rank_weights(
         self,
-        returns_list: list[np.ndarray],
+        total_reward_list: list[float],
     ) -> np.ndarray:
         """
         Compute episode weights based on reward ranks and user-configured weights.
         """
         weights_conf = self.agent_config.reward_rank_weights
         
-        n_traj = len(returns_list)
+        n_traj = len(total_reward_list)
         if n_traj == 0:
             return np.array([], dtype=np.float32)
         
@@ -516,12 +564,7 @@ class ReinforceAgent:
         weights_conf = np.asarray(weights_conf, dtype=np.float32)
         num_bins = len(weights_conf)
         
-        total_returns = np.array(
-            [float(r.sum()) for r in returns_list],
-            dtype=np.float32,
-        )
-        
-        sorted_indices = np.argsort(total_returns)  # shape (n_traj,)
+        sorted_indices = np.argsort(total_reward_list)
         
         episode_weights = np.zeros(n_traj, dtype=np.float32)
         
@@ -531,6 +574,10 @@ class ReinforceAgent:
             if bin_idx >= num_bins:
                 bin_idx = num_bins - 1
             episode_weights[epi_idx] = weights_conf[bin_idx]
+            
+        mean_w = np.mean(episode_weights)
+        if mean_w > 1e-8:
+            episode_weights = episode_weights / mean_w
         
         return episode_weights
 
@@ -570,3 +617,37 @@ class ReinforceAgent:
             self.params["W"][l] = self.params["W"][l] + lr * mW_hat / (np.sqrt(vW_hat) + eps)
             self.params["b"][l] = self.params["b"][l] + lr * mB_hat / (np.sqrt(vB_hat) + eps)
 
+
+    def _augment_trajectories(
+        self, 
+        trajectories: list[dict[str, Any]],
+        advantages_list: list[np.ndarray],
+        episode_rank_weights: np.ndarray,
+        ) -> tuple[dict[str, Any], list[np.ndarray], np.ndarray]:
+        """
+        Perform data augmentation on trajectories using environment symmetries.
+        Return a new list of augmented trajectories.
+        """
+        augmented_trajectories = []
+
+        for traj in trajectories:
+            orig_obs = traj["obs"] 
+            orig_actions = traj["actions"]
+            
+            aug_data = [ {"obs": [], "actions": [], "advantages": [], "returns": []} for _ in range(8) ]
+            
+            for t in range(len(orig_obs)):
+                syms = self.env.get_symmetries(orig_obs[t], orig_actions[t])
+                
+                for i in range(8):
+                    s_board, s_action = syms[i]
+                    aug_data[i]["obs"].append(s_board)
+                    aug_data[i]["actions"].append(s_action)
+
+            augmented_trajectories.extend(aug_data)
+            
+        augmented_advantages_list: list[np.ndarray] = [x for x in advantages_list for _ in range(8)]
+        
+        augmented_episode_rank_weights = np.repeat(episode_rank_weights, 8)
+            
+        return augmented_trajectories, augmented_advantages_list, augmented_episode_rank_weights
