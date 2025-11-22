@@ -80,12 +80,22 @@ class Game2048Env(gym.Env):
                 shape=(size, size),
                 dtype=np.float32,
             )
-        elif self.config.obs_mode == "log2" or self.config.obs_mode == "onehot":
+        elif self.config.obs_mode == "log2":
             # log2: 0, 1, 2, 3, ...
             board_space = spaces.Box(
                 low=0.0,
                 high=self._max_num,
                 shape=(size, size),
+                dtype=np.float32,
+            )
+        elif self.config.obs_mode == "onehot":
+            # onehot: 0 or 1, shape includes channels [H, W, C]
+            max_exp = int(self._max_num)
+            num_channels = max_exp + 1
+            board_space = spaces.Box(
+                low=0.0,
+                high=1.0,
+                shape=(size, size, num_channels),
                 dtype=np.float32,
             )
         else:
