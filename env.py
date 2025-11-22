@@ -19,17 +19,25 @@ from game.game2048 import Game2048, Action
 @dataclass
 class Game2048EnvConfig:
     size: int = 4
+    # obs
     obs_mode: ObsMode = "raw"               # raw / log2 / onehot
     obs_log2_scale: float = 1.0             # scale factor for log2 observation
+    # basic reward
     reward_mode: RewardMode = "sum"         # sum / log2
-    reward_scale: float = 1.0               # scale factor for reward
+    base_reward_scale: float = 1.0          # scale factor for base reward
+    # additional rewards
+    empty_tile_reward: float = 0.0          # reward for each empty tile
+    merge_reward: float = 0.0               # reward for each merge
+    # record bonus
     bonus_mode: BonusMode = "off"           # off / raw / log2
     bonus_scale: float = 1.0                # scale factor for bonus
+    # step and endgame rewards
     step_reward: float = 0.0                # reward for each step
     endgame_penalty: float = 0.0            # penalty at the end of game
+    # action mask
     use_action_mask: bool = True            # T / F
     invalid_action_penalty: float = -1.0    # penalty when not using action musk
-    max_steps: int = 1024                   # max step in an episode
+    max_steps: int = 1024                   # max step in an episode (usually no need with action mask)
     
 
 
@@ -148,7 +156,7 @@ class Game2048Env(gym.Env):
         return np.array(mask_list, dtype=np.int8)
     
     
-    def _get_obs(self) -> np.ndarray | dict[str, Any]:
+    def _get_obs(self) -> np.ndarray | dict[str, np.ndarray]:
         board = self.game.board
         
         processed = self._preprocess_board(board)
@@ -168,7 +176,7 @@ class Game2048Env(gym.Env):
         *,
         seed: int | None = None,
         options: dict[str, Any] | None = None,
-    ) -> tuple[Any, dict[str, Any]]:
+    ) -> tuple[np.ndarray | dict[str, np.ndarray], dict[str, Any]]:
         super().reset(seed=seed)
 
         self._step_count = 0
@@ -214,7 +222,17 @@ class Game2048Env(gym.Env):
         else:
             raise ValueError(f"Unsupported reward mode: {cfg.reward_mode}")
         
-        reward *= cfg.reward_scale
+        reward *= cfg.base_reward_scale
+        
+        # empty tile reward
+        if cfg.empty_tile_reward != 0.0:
+            num_empty = np.sum(self.game.board == 0)
+            reward += cfg.empty_tile_reward * float(num_empty)
+        
+        # merge reward
+        if cfg.merge_reward != 0.0:
+            num_merge = len(merged)
+            reward += cfg.merge_reward * float(num_merge)
         
         # bonus reward
         bonus = 0.0
@@ -243,7 +261,7 @@ class Game2048Env(gym.Env):
         return reward
     
     
-    def step(self, action: int) -> tuple[np.ndarray | dict[str, Any], float, bool, bool, dict[str, Any]]:
+    def step(self, action: Action) -> tuple[np.ndarray | dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
         assert self.action_space.contains(action), f"Invalid action: {action}"
 
         self._step_count += 1
