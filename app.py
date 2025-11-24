@@ -50,11 +50,11 @@ import streamlit as st
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from env import Game2048Env, Game2048EnvConfig
-from MLP import MLPConfig
-from reinforce_agent import ReinforceAgent, ReinforceAgentConfig
+from src.env import Game2048Env, Game2048EnvConfig
+from src.MLP import MLPConfig
+from src.reinforce_agent import ReinforceAgent, ReinforceAgentConfig
 
-import logging_ext
+import src.utils.logging_ext as logging_ext     # add VERBOSE level to logging
 
 
 # ==========================

@@ -1,7 +1,12 @@
+import sys
+from pathlib import Path
+
+project_root = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(project_root))
 
 import logging
 
-from .game2048 import Game2048, Action
+from src.game2048 import Game2048, Action
 
 def _action_from_input(s: str) -> Action | None:
     s = s.strip().lower()

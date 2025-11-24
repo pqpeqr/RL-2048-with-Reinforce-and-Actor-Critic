@@ -87,13 +87,13 @@ from typing import Generator, List, Dict, Any
 
 import numpy as np
 
-from env import Game2048Env, Game2048EnvConfig
-from MLP import MLPConfig
-from reinforce_agent import ReinforceAgent, ReinforceAgentConfig
+from src.env import Game2048Env, Game2048EnvConfig
+from src.MLP import MLPConfig
+from src.reinforce_agent import ReinforceAgent, ReinforceAgentConfig
 
-from timer import timer
+from src.utils.timer import timer
 
-import logging_ext  # noqa: F401  # register custom log levels (e.g. VERBOSE)
+import src.utils.logging_ext as logging_ext          # register custom log levels (e.g. VERBOSE)
 
 
 logger = logging.getLogger(__name__)

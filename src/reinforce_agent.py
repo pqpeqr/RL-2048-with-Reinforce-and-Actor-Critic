@@ -1,6 +1,6 @@
 import numpy as np
 
-from env import Game2048Env
+from .env import Game2048Env
 
 from collections.abc import Callable
 from typing import Literal, Any
@@ -9,9 +9,9 @@ from collections.abc import Iterator
 
 
 import logging
-import logging_ext      # add VERBOSE level to logging
+import src.utils.logging_ext as logging_ext      # add VERBOSE level to logging
 
-from MLP import *
+from .MLP import *
 
 
 

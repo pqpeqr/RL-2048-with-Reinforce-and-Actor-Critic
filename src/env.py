@@ -13,7 +13,7 @@ RewardMode = Literal["sum", "log2"]
 BonusMode = Literal["off", "raw", "log2"]
 
 
-from game.game2048 import Game2048, Action
+from .game2048 import Game2048, Action
 
 
 @dataclass
