@@ -415,11 +415,113 @@ class ReinforceAgent:
         if n_traj == 0:
             return
 
-        # accumulate gradients
-        for traj, advantages, episode_rank_weight in zip(trajectories, advantages_list, episode_rank_weights):
+        # update critic and compute TD errors
+        if self.agent_config.use_critic and self.critic_params is not None:
+            td_errors_list: list[np.ndarray] = []
+            
+            for traj, episode_rank_weight in zip(trajectories, episode_rank_weights):
+                obs_list = traj["obs"]
+                reward_list = traj["rewards"]
+                T = len(obs_list)
+                if T == 0:
+                    td_errors_list.append(np.zeros(0, dtype=np.float32))
+                    continue
+                
+                x_list = []
+                for o in obs_list:
+                    x, _ = encode_observation(o)
+                    x_list.append(x)
+                X_batch = np.array(x_list)  # (T, input_dim)
+                
+                reward_batch = np.array(reward_list, dtype=np.float32)  # (T,)
+                # move one step forward for next state values
+                # padding the last state with itself, will be masked out by done mask
+                X_next_batch = np.concatenate([X_batch[1:], X_batch[-1:]], axis=0)
+                
+                v_logits, v_acts, v_pre_acts = forward_logits(
+                    self.critic_params, 
+                    X_batch, 
+                    self.mlp_config.activation
+                )
+                v_curr = v_logits.flatten()         # Shape: (T, 1) -> (T,)
+                
+                v_next_logits, _, _ = forward_logits(
+                    self.critic_params, 
+                    X_next_batch, 
+                    self.mlp_config.activation
+                )
+                v_next = v_next_logits.flatten()    # Shape: (T, 1) -> (T,)
+                
+                mask_done = np.ones(T, dtype=np.float32)
+                mask_done[-1] = 0.0
+                
+                gamma = self.agent_config.gamma
+                td_targets = reward_batch + gamma * v_next * mask_done
+                
+                td_errors = td_targets - v_curr
+                
+                td_errors_list.append(td_errors.astype(np.float32))
+                
+                # compute critic gradients
+                # loos = 0.5 * (v_curr - td_targets)^2
+                # dloss / dv_logits = v_curr - td_targets
+                grad_logits_c = (v_curr - td_targets).astype(np.float32).reshape(-1, 1)
+                
+                # backpropagate through time for critic
+                for t in range(T):
+                    v_acts_t = [layer[t] for layer in v_acts]
+                    v_pre_t  = [layer[t] for layer in v_pre_acts]
+                    grad_logits_c_t = grad_logits_c[t]
+
+                    dW_c_t, db_c_t = self._backpropagation(
+                        self.critic_params, 
+                        v_acts_t, 
+                        v_pre_t, 
+                        grad_logits_c_t
+                    )
+                    
+                    base_weight = 1.0 / (T * n_traj)
+                    c_weight = base_weight * float(episode_rank_weight)
+
+                    for l in range(len(grad_W_c_list)):
+                        grad_W_c_list[l] += c_weight * dW_c_t[l]
+                        grad_b_c_list[l] += c_weight * db_c_t[l]
+                
+                # logging
+                td_loss = 0.5 * float(np.mean(td_errors ** 2))
+                td_abs_mean = float(np.mean(np.abs(td_errors)))
+                td_abs_max = float(np.max(np.abs(td_errors)))
+                v_mean = float(np.mean(v_curr))
+                v_std = float(np.std(v_curr) + 1e-8)
+                # Monte-Carlo return
+                returns_mc = self.compute_returns(reward_list)
+                if returns_mc.std() > 1e-8 and v_std > 1e-8:
+                    corr_v_ret = float(np.corrcoef(v_curr, returns_mc)[0, 1])
+                else:
+                    corr_v_ret = 0.0
+                self._logger.verbose(
+                    f"[Critic] td_loss={td_loss:.6f}, "
+                    f"|δ|_mean={td_abs_mean:.6f}, "
+                    f"|δ|_max={td_abs_max:.6f}, "
+                    f"V_mean={v_mean:.6f}, "
+                    f"V_std={v_std:.6f}, "
+                    f"corr(V, G)={corr_v_ret:.3f}"
+                )
+                
+            advantages_list = self._compute_advantages(
+                td_errors_list,
+                episode_rank_weights,
+            )
+                
+        
+        # actor policy gradient update
+        for traj, advantages, episode_rank_weight in zip(
+            trajectories, 
+            advantages_list, 
+            episode_rank_weights,
+        ):
             obs_list = traj["obs"]
             action_list = traj["actions"]
-            
             
             T = len(obs_list)
             if T == 0:
@@ -443,80 +545,8 @@ class ReinforceAgent:
             )
             probs_batch = logits_to_probs(logits_batch, mask_batch)
 
-            # critic update
-            if self.agent_config.use_critic and self.critic_params is not None:
-                reward_list = traj["rewards"]
-                reward_batch = np.array(reward_list, dtype=np.float32)   # Shape: (T,)
-                # move one step forward for next state values
-                # padding the last state with itself, will be masked out by done mask
-                X_next_batch = np.concatenate([X_batch[1:], X_batch[-1:]], axis=0)
-                
-                v_logits, v_acts, v_pre_acts = forward_logits(
-                    self.critic_params, X_batch, self.mlp_config.activation
-                )
-                v_curr = v_logits.flatten()         # Shape: (T, 1) -> (T,)
-                
-                v_next_logits, _, _ = forward_logits(
-                    self.critic_params, X_next_batch, self.mlp_config.activation
-                )
-                v_next = v_next_logits.flatten()    # Shape: (T, 1) -> (T,)
-                
-                mask_done = np.ones(T, dtype=np.float32)
-                mask_done[-1] = 0.0
-                
-                gamma = self.agent_config.gamma
-                td_targets = reward_batch + gamma * v_next * mask_done
-                
-                td_errors = td_targets - v_curr
-                advantages = td_errors          # overwrite advantages for actor update
-                
-                # compute critic gradients
-                # loos = 0.5 * (v_curr - td_targets)^2
-                # dloss / dv_logits = v_curr - td_targets
-                grad_logits_c = (v_curr - td_targets).astype(np.float32).reshape(-1, 1)
-                
-                
-                # logging
-                td_loss = 0.5 * float(np.mean(td_errors ** 2))
-                td_abs_mean = float(np.mean(np.abs(td_errors)))
-                td_abs_max = float(np.max(np.abs(td_errors)))
-                v_mean = float(np.mean(v_curr))
-                v_std = float(np.std(v_curr) + 1e-8)
-                # Monte-Carlo return
-                returns_mc = self.compute_returns(reward_list)
-                if returns_mc.std() > 1e-8 and v_std > 1e-8:
-                    corr_v_ret = float(np.corrcoef(v_curr, returns_mc)[0, 1])
-                else:
-                    corr_v_ret = 0.0
-                self._logger.info(
-                    f"[Critic] td_loss={td_loss:.6f}, |δ|_mean={td_abs_mean:.6f}, |δ|_max={td_abs_max:.6f}, "
-                    f"V_mean={v_mean:.6f}, V_std={v_std:.6f}, corr(V, G)={corr_v_ret:.3f}"
-                )
-                
-                # backpropagate through time for critic
-                for t in range(T):
-                    v_acts_t = [layer[t] for layer in v_acts]
-                    v_pre_t  = [layer[t] for layer in v_pre_acts]
-                    grad_logits_c_t = grad_logits_c[t]
-
-                    dW_c_t, db_c_t = self._backpropagation(
-                        self.critic_params, 
-                        v_acts_t, 
-                        v_pre_t, 
-                        grad_logits_c_t
-                    )
-                    
-                    base_weight = 1.0 / (n_traj)
-                    c_weight = base_weight * float(episode_rank_weight)
-
-                    for l in range(len(grad_W_c_list)):
-                        grad_W_c_list[l] += c_weight * dW_c_t[l]
-                        grad_b_c_list[l] += c_weight * db_c_t[l]
-                
-
-
             # average over all time steps then over all trajectories
-            base_episode_weight = 1.0 / (n_traj)
+            base_episode_weight = 1.0 / (T * n_traj)
             weight = base_episode_weight * float(episode_rank_weight)
             
             for t in range(T):
@@ -540,7 +570,27 @@ class ReinforceAgent:
                     grad_W_list[l] += weight * dW_t[l]
                     grad_b_list[l] += weight * db_t[l]
             
-            
+        # update parameters (gradient ascent)
+        if self.agent_config.optimizer == "sgd":
+            lr = self.agent_config.learning_rate
+            for l in range(len(self.params["W"])):
+                self.params["W"][l] += lr * grad_W_list[l]
+                self.params["b"][l] += lr * grad_b_list[l]
+            # critic
+            lr_c = self.agent_config.critic_learning_rate
+            if self.agent_config.use_critic and self.critic_params is not None:
+                for l in range(len(self.critic_params["W"])):
+                    self.critic_params["W"][l] -= lr_c * grad_W_c_list[l]
+                    self.critic_params["b"][l] -= lr_c * grad_b_c_list[l]
+        elif self.agent_config.optimizer == "adam":
+            self._adam_update(grad_W_list, grad_b_list)
+            # critic
+            if self.agent_config.use_critic and self.critic_params is not None:
+                self._adam_update(grad_W_c_list, grad_b_c_list, prefix="critic")
+        else:
+            raise ValueError(f"Unknown optimizer: {self.agent_config.optimizer}")
+        
+
         # logging for gradient norms
         if self._logger.isEnabledFor(logging.INFO):
             batch_grad_W_norms = [np.linalg.norm(gW) for gW in grad_W_list]
@@ -550,38 +600,51 @@ class ReinforceAgent:
             batch_grad_b_norms_str = ", ".join(f"{n:.6f}" for n in batch_grad_b_norms)
 
             self._logger.info(
-                f"Step grad_W norms: [{batch_grad_W_norms_str}], "
+                f"[Actor] Step grad_W norms: [{batch_grad_W_norms_str}], "
                 f"grad_b norms: [{batch_grad_b_norms_str}]"
             )
-
-
-        # update parameters (gradient ascent)
-        if self.agent_config.optimizer == "sgd":
-            lr = self.agent_config.learning_rate
-            for l in range(len(self.params["W"])):
-                self.params["W"][l] += lr * grad_W_list[l]
-                self.params["b"][l] += lr * grad_b_list[l]
             
-            # critic
-            lr_c = self.agent_config.critic_learning_rate
             if self.agent_config.use_critic and self.critic_params is not None:
-                for l in range(len(self.critic_params["W"])):
-                    self.critic_params["W"][l] -= lr_c * grad_W_c_list[l]
-                    self.critic_params["b"][l] -= lr_c * grad_b_c_list[l]
+                batch_grad_W_c_norms = [np.linalg.norm(gW) for gW in grad_W_c_list]
+                batch_grad_b_c_norms = [np.linalg.norm(gb) for gb in grad_b_c_list]
+                
+                batch_grad_W_c_norms_str = ", ".join(f"{n:.6f}" for n in batch_grad_W_c_norms)
+                batch_grad_b_c_norms_str = ", ".join(f"{n:.6f}" for n in batch_grad_b_c_norms)
 
-        elif self.agent_config.optimizer == "adam":
-            self._adam_update(grad_W_list, grad_b_list)
+                self._logger.info(
+                    f"[Critic] Step grad_W norms: [{batch_grad_W_c_norms_str}], "
+                    f"grad_b norms: [{batch_grad_b_c_norms_str}]"
+                )
             
-            # critic
-            if self.agent_config.use_critic and self.critic_params is not None:
-                self._adam_update(grad_W_c_list, grad_b_c_list, prefix="critic")
+            # advantages info
+            all_adv_list = [a for a in advantages_list if a is not None and len(a) > 0]
+            if len(all_adv_list) > 0:
+                all_adv = np.concatenate(all_adv_list).astype(np.float32)
+                
+                adv_mean = float(all_adv.mean())
+                adv_std  = float(all_adv.std())
+                adv_min  = float(all_adv.min())
+                adv_max  = float(all_adv.max())
+
+                # prob of positive/negative advantages
+                num_pos = int((all_adv > 0).sum())
+                num_neg = int((all_adv < 0).sum())
+                total   = len(all_adv)
+                
+                # outliers
+                k = min(5, total)
+                top_idx = np.argsort(-np.abs(all_adv))[:k]
+                top_vals = ", ".join(f"{all_adv[i]:.4f}" for i in top_idx)
+
+                self._logger.info(
+                    "Advantages stats: mean=%.6f, std=%.6f, min=%.6f, max=%.6f, "
+                    "pos=%d, neg=%d, total=%d, top|A|=%s",
+                    adv_mean, adv_std, adv_min, adv_max,
+                    num_pos, num_neg, total, top_vals,
+                )
 
 
-        else:
-            raise ValueError(f"Unknown optimizer: {self.agent_config.optimizer}")
-            
-            
-            
+
     def _activation_derivative(self, z: np.ndarray) -> np.ndarray:
         """
         Compute the derivative of the activation function
