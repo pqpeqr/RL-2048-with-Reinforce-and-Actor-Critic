@@ -37,6 +37,8 @@ class ReinforceAgentConfig:
     
     use_critic: bool = False                    # Actor-Critic switch
     critic_learning_rate: float = 1e-3          # Critic learning rate
+    
+    max_grad_norm: 1.0                          # global gradient clipping norm
 
 
 
@@ -569,7 +571,14 @@ class ReinforceAgent:
                 for l in range(len(grad_W_list)):
                     grad_W_list[l] += weight * dW_t[l]
                     grad_b_list[l] += weight * db_t[l]
-            
+        
+        
+        # global gradient clipping
+        actor_grad_norm = self.clip_grads_global_norm(grad_W_list, grad_b_list)
+        if self.agent_config.use_critic and self.critic_params is not None:
+            critic_grad_norm = self.clip_grads_global_norm(grad_W_c_list, grad_b_c_list)
+        
+        
         # update parameters (gradient ascent)
         if self.agent_config.optimizer == "sgd":
             lr = self.agent_config.learning_rate
@@ -593,27 +602,12 @@ class ReinforceAgent:
 
         # logging for gradient norms
         if self._logger.isEnabledFor(logging.INFO):
-            batch_grad_W_norms = [np.linalg.norm(gW) for gW in grad_W_list]
-            batch_grad_b_norms = [np.linalg.norm(gb) for gb in grad_b_list]
-            
-            batch_grad_W_norms_str = ", ".join(f"{n:.6f}" for n in batch_grad_W_norms)
-            batch_grad_b_norms_str = ", ".join(f"{n:.6f}" for n in batch_grad_b_norms)
-
             self._logger.info(
-                f"[Actor] Step grad_W norms: [{batch_grad_W_norms_str}], "
-                f"grad_b norms: [{batch_grad_b_norms_str}]"
+                f"Global Grad Norms: Actor: {actor_grad_norm:.4f}"
             )
-            
             if self.agent_config.use_critic and self.critic_params is not None:
-                batch_grad_W_c_norms = [np.linalg.norm(gW) for gW in grad_W_c_list]
-                batch_grad_b_c_norms = [np.linalg.norm(gb) for gb in grad_b_c_list]
-                
-                batch_grad_W_c_norms_str = ", ".join(f"{n:.6f}" for n in batch_grad_W_c_norms)
-                batch_grad_b_c_norms_str = ", ".join(f"{n:.6f}" for n in batch_grad_b_c_norms)
-
                 self._logger.info(
-                    f"[Critic] Step grad_W norms: [{batch_grad_W_c_norms_str}], "
-                    f"grad_b norms: [{batch_grad_b_c_norms_str}]"
+                    f"Global Grad Norms: Critic: {critic_grad_norm:.4f}"
                 )
             
             # advantages info
@@ -854,3 +848,32 @@ class ReinforceAgent:
             self._adam_v_W_c = v_W
             self._adam_m_B_c = m_B
             self._adam_v_B_c = v_B
+            
+            
+    def clip_grads_global_norm(self, grad_W_list, grad_b_list):
+        """
+        calculate l2 norm of all gradients and clip them if exceed max_norm
+        """
+        max_norm = self.agent_config.max_grad_norm
+        
+        total_norm_sq = 0.0
+        for gW in grad_W_list:
+            total_norm_sq += np.linalg.norm(gW)**2
+        for gb in grad_b_list:
+            total_norm_sq += np.linalg.norm(gb)**2
+
+        total_norm = np.sqrt(total_norm_sq)
+        
+        clip_coef = max_norm / max(total_norm, 1e-8)
+
+        if clip_coef < 1.0:
+            for i in range(len(grad_W_list)):
+                grad_W_list[i] *= clip_coef
+            for i in range(len(grad_b_list)):
+                grad_b_list[i] *= clip_coef
+            self._logger.verbose(
+                f"Clipping gradients: total_norm={total_norm:.4f} > max_norm={max_norm:.4f}, "
+                f"clip_coef={clip_coef:.6f}"
+            )
+                
+        return total_norm   # return original norm for logging purposes
