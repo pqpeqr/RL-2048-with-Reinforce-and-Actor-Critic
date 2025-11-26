@@ -1,3 +1,4 @@
+# runner.py
 """
 2048 REINFORCE runner
 
@@ -40,7 +41,9 @@ Example structure of the configuration file (JSON):
     "adam_beta2": 0.999,
     "augmentation": false,
     "use_critic": true,
-    "critic_learning_rate": 0.0005
+    "critic_learning_rate": 0.0005,
+    "critic_loss_type": "mse",
+    "huber_delta": 1.0
   },
   "train": {
     "batch_size": 256,
@@ -52,7 +55,8 @@ Example structure of the configuration file (JSON):
     "num_episodes": 50,
     "env_base_seed": 3,
     "policy_base_seed": 7,
-    "model_path": null
+    "model_path": null,
+    "use_greedy": true
   },
   "run_mode": "Training",
   "log_level": "VERBOSE"
@@ -67,6 +71,7 @@ Field descriptions (core parts):
 - eval:         evaluation-related parameters
     - model_path: if not null and run_mode is "Evaluation",
                   agent.load_model(model_path) will be called to load model weights.
+    - use_greedy: bool, whether to evaluate with greedy policy (True) or stochastic policy (False).
 - run_mode:     "Training" or "Evaluation" (case-insensitive)
 - log_level:    log level string such as "INFO", "DEBUG", "VERBOSE", etc.
 
@@ -145,7 +150,9 @@ DEFAULT_AGENT_KWARGS: Dict[str, Any] = {
     "adam_beta2": 0.999,            # float, Adam beta2
     "augmentation": False,          # bool, whether to use data augmentation
     "use_critic": False,            # bool, whether to enable Critic (Actor-Critic)
-    "critic_learning_rate": 1e-5,  # float, Critic learning rate
+    "critic_learning_rate": 1e-5,   # float, Critic learning rate
+    "critic_loss_type": "mse",      # str, critic loss type: ["mse", "huber"]
+    "huber_delta": 1.0,             # float, delta for Huber loss (if used)
 }
 
 # Default training configuration
@@ -162,6 +169,7 @@ DEFAULT_EVAL_CONFIG: Dict[str, Any] = {
     "env_base_seed": 12345,     # int, base random seed for evaluation environments
     "policy_base_seed": 54321,  # int, base random seed for evaluation policies
     "model_path": None,         # None | str, if not None, evaluation will attempt to load this model
+    "use_greedy": True,         # bool, evaluate with greedy policy if True
 }
 
 # Default log level
@@ -737,13 +745,14 @@ def evaluation_loop(
     """
     Evaluation loop:
     - Use fixed number of episodes and seeds
-    - Run agent.run_episode(..., use_greedy=True) for policy execution
+    - Run agent.run_episode(..., use_greedy=eval_cfg["use_greedy"]) for policy execution
     - Collect statistics of rewards and max_tile distribution
     - Log overall summary and the state sequence of the highest-scoring episode
     """
     num_episodes = int(eval_cfg["num_episodes"])
     env_base_seed = int(eval_cfg["env_base_seed"])
     policy_base_seed = int(eval_cfg["policy_base_seed"])
+    use_greedy = bool(eval_cfg.get("use_greedy", True))
 
     env_seed_iter = make_fixed_seed_iter(base_seed=env_base_seed)
     policy_seed_iter = make_fixed_seed_iter(base_seed=policy_base_seed)
@@ -769,10 +778,11 @@ def evaluation_loop(
     )
 
     logger.info(
-        "Start evaluation: episodes=%d, env_base_seed=%d, policy_base_seed=%d",
+        "Start evaluation: episodes=%d, env_base_seed=%d, policy_base_seed=%d, use_greedy=%s",
         num_episodes,
         env_base_seed,
         policy_base_seed,
+        use_greedy,
     )
 
     for ep_idx in range(num_episodes):
@@ -781,7 +791,7 @@ def evaluation_loop(
         env_seed = next(env_seed_iter)
         policy_seed = next(policy_seed_iter)
 
-        trajectory = agent.run_episode(env_seed, policy_seed, action_gen=None, use_greedy=True)
+        trajectory = agent.run_episode(env_seed, policy_seed, action_gen=None, use_greedy=use_greedy)
         total_reward = float(trajectory["total_reward"])
         all_rewards.append(total_reward)
 

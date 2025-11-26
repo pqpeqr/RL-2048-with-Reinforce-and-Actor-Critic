@@ -40,7 +40,7 @@ class ReinforceAgentConfig:
     use_critic: bool = False                    # Actor-Critic switch
     critic_learning_rate: float = 1e-3          # Critic learning rate
     
-    max_grad_norm: 1.0                          # global gradient clipping norm
+    max_grad_norm: float = 1.0                  # global gradient clipping norm
     
     critic_loss_type: CriticLossType = "mse"    # "mse" or "huber"
     huber_delta: float = 1.0                    # delta for Huber loss (if used)

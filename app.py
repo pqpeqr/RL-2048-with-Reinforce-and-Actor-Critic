@@ -1,3 +1,5 @@
+# app.py
+
 """
 Streamlit visualization console: training and evaluation dashboard for 2048 environment + REINFORCE algorithm.
 
@@ -17,6 +19,7 @@ Current features:
        * Evaluate current policy over multiple episodes
        * Plot per-episode reward curve
        * Collect max_tile distribution (table + pie chart)
+       * Configurable greedy / stochastic evaluation (use_greedy)
 
 3. Configuration persistence:
    - Auto load / save config.json
@@ -34,7 +37,7 @@ Current features:
              save a model snapshot model_*.npz
    - Every Evaluation:
        * Create an eval_*.log file in ./training_history/
-       * Optionally load model parameters from a specified file before evaluation
+       * Optionally load model parameters from a specified file before evaluation (eval.model_path)
 """
 
 import sys
@@ -588,8 +591,9 @@ def run_evaluation(
     1. Configure evaluation parameters:
        - num_episodes
        - env_base_seed / policy_base_seed
+       - use_greedy (greedy vs stochastic policy)
     2. Optionally load model parameters from a specified file:
-       - If model_params_path is set, call agent.load_model before evaluation;
+       - If model_path is set, call agent.load_model before evaluation;
        - If loading fails, show error and abort evaluation.
     3. After pressing "Start Evaluation":
        - Loop for num_episodes:
@@ -629,7 +633,12 @@ def run_evaluation(
         key="policy_base_seed_eval",
     )
 
-    model_params_path = st.text_input(
+    use_greedy = st.checkbox(
+        "Use greedy policy during evaluation (disable to sample stochastically)",
+        key="eval_use_greedy",
+    )
+
+    model_path = st.text_input(
         "Model parameters file path (optional)",
         value="",
         key="eval_model_params_path",
@@ -669,8 +678,8 @@ def run_evaluation(
     logger.info("Evaluation log file: %s", str(eval_log_file_path))
 
     # Load model parameters if a path is provided
-    if model_params_path.strip():
-        path_str = model_params_path.strip()
+    if model_path.strip():
+        path_str = model_path.strip()
         try:
             agent.load_model(path_str)
             logger.info("Evaluation: model parameters loaded from %s", path_str)
@@ -680,7 +689,7 @@ def run_evaluation(
             return
 
     # -------- Log configuration --------
-    cfg_model_path = model_params_path or None
+    cfg_model_path = model_path or None
 
     full_cfg = build_full_config_dict(
         env_config=env_config,
@@ -692,7 +701,8 @@ def run_evaluation(
                 "num_episodes": num_episodes,
                 "env_base_seed": env_base_seed,
                 "policy_base_seed": policy_base_seed,
-                "model_params_path": cfg_model_path,
+                "model_path": cfg_model_path,
+                "use_greedy": use_greedy,
             },
         },
     )
@@ -702,10 +712,11 @@ def run_evaluation(
     )
 
     logger.info(
-        "Start evaluation: num_episodes=%d, env_base_seed=%d, policy_base_seed=%d",
+        "Start evaluation: num_episodes=%d, env_base_seed=%d, policy_base_seed=%d, use_greedy=%s",
         num_episodes,
         env_base_seed,
         policy_base_seed,
+        use_greedy,
     )
 
     # Build seed generators
@@ -723,7 +734,7 @@ def run_evaluation(
         env_seed = next(env_seed_iter)
         policy_seed = next(policy_seed_iter)
 
-        trajectory = agent.run_episode(env_seed, policy_seed)
+        trajectory = agent.run_episode(env_seed, policy_seed, use_greedy=use_greedy)
         total_reward = trajectory["total_reward"]
         max_tile = trajectory.get("max_tile", 0)
 
@@ -865,6 +876,8 @@ def main() -> None:
                 "augmentation": False,
                 "use_critic": False,
                 "critic_learning_rate": 1e-3,
+                "critic_loss_type": "mse",
+                "huber_delta": 1.0,
             },
             "train": {
                 "batch_size": 32,
@@ -876,7 +889,8 @@ def main() -> None:
                 "num_episodes": 50,
                 "env_base_seed": 3,
                 "policy_base_seed": 7,
-                "model_params_path": None,
+                "model_path": None,
+                "use_greedy": True,
             },
             "run_mode": "Training",
             "log_level": "VERBOSE",
@@ -911,7 +925,6 @@ def main() -> None:
 
         use_action_mask_bool = env_cfg.get("use_action_mask", default_cfg["env"]["use_action_mask"])
         st.session_state["use_action_mask"] = use_action_mask_bool
-        st.session_state["use_action_mask_label"] = "On" if use_action_mask_bool else "Off"
 
         st.session_state["invalid_action_penalty"] = env_cfg.get(
             "invalid_action_penalty",
@@ -972,6 +985,14 @@ def main() -> None:
             "critic_learning_rate",
             default_cfg["agent"]["critic_learning_rate"],
         )
+        st.session_state["critic_loss_type"] = agent_cfg.get(
+            "critic_loss_type",
+            default_cfg["agent"]["critic_loss_type"],
+        )
+        st.session_state["huber_delta"] = agent_cfg.get(
+            "huber_delta",
+            default_cfg["agent"]["huber_delta"],
+        )
 
         # --- Training-related config -> session_state ---
         st.session_state["batch_size"] = train_cfg.get("batch_size", default_cfg["train"]["batch_size"])
@@ -996,15 +1017,17 @@ def main() -> None:
             default_cfg["eval"]["policy_base_seed"],
         )
 
-        raw_model_path = eval_cfg.get(
-            "model_params_path",
-            default_cfg["eval"]["model_params_path"],
-        )
+        raw_model_path = eval_cfg.get("model_path", default_cfg["eval"]["model_path"]),
         if raw_model_path is None or raw_model_path == "None":
             model_path_for_ui = ""
         else:
             model_path_for_ui = str(raw_model_path)
         st.session_state["eval_model_params_path"] = model_path_for_ui
+
+        st.session_state["eval_use_greedy"] = eval_cfg.get(
+            "use_greedy",
+            default_cfg["eval"]["use_greedy"],
+        )
 
         # --- Run Mode ---
         st.session_state["mode"] = run_mode
@@ -1127,16 +1150,10 @@ def main() -> None:
                 key="endgame_penalty",
             )
 
-            # use_action_mask controlled by a segmented_control with On/Off label
-            use_action_mask_label = st.segmented_control(
+            use_action_mask = st.checkbox(
                 "use_action_mask",
-                options=["Off", "On"],
-                selection_mode="single",
-                width="stretch",
-                key="use_action_mask_label",
+                key="use_action_mask",
             )
-            use_action_mask = (use_action_mask_label == "On")
-            st.session_state["use_action_mask"] = use_action_mask
 
             invalid_action_penalty = st.number_input(
                 "invalid_action_penalty",
@@ -1277,6 +1294,25 @@ def main() -> None:
                 help="Only used when use_critic = True.",
             )
 
+            critic_loss_type = st.segmented_control(
+                "critic_loss_type",
+                options=["mse", "huber"],
+                selection_mode="single",
+                width="stretch",
+                key="critic_loss_type",
+                help="Loss type for critic network.",
+            )
+
+            huber_delta = st.number_input(
+                "huber_delta",
+                min_value=0.0,
+                max_value=1000.0,
+                step=0.1,
+                format="%.4f",
+                key="huber_delta",
+                help="Delta parameter for Huber loss (used when critic_loss_type='huber').",
+            )
+
     # ========= Parse hidden_sizes / reward_rank_weights =========
     def parse_hidden_sizes(s: str) -> List[int]:
         """
@@ -1351,6 +1387,8 @@ def main() -> None:
         augmentation=augmentation,
         use_critic=use_critic,
         critic_learning_rate=critic_learning_rate,
+        critic_loss_type=critic_loss_type,
+        huber_delta=huber_delta,
     )
 
     # ========= Run mode selection (Training / Evaluation) =========
@@ -1412,6 +1450,8 @@ def main() -> None:
                 "augmentation": agent_config.augmentation,
                 "use_critic": agent_config.use_critic,
                 "critic_learning_rate": agent_config.critic_learning_rate,
+                "critic_loss_type": agent_config.critic_loss_type,
+                "huber_delta": agent_config.huber_delta,
             },
             "train": {
                 "batch_size": st.session_state.get("batch_size"),
@@ -1423,9 +1463,10 @@ def main() -> None:
                 "num_episodes": st.session_state.get("num_episodes"),
                 "env_base_seed": st.session_state.get("env_base_seed_eval"),
                 "policy_base_seed": st.session_state.get("policy_base_seed_eval"),
-                "model_params_path": (
+                "model_path": (
                     st.session_state.get("eval_model_params_path") or None
                 ),
+                "use_greedy": st.session_state.get("eval_use_greedy", True),
             },
             "run_mode": mode,
             "log_level": st.session_state.get("log_level", "INFO"),
