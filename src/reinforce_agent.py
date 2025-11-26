@@ -18,6 +18,8 @@ from .MLP import *
 
 BaselineMode = Literal["off", "each", "batch", "batch_norm"]
 OptimizerType = Literal["sgd", "adam"]
+CriticLossType = Literal["mse", "huber"]
+
 
 @dataclass
 class ReinforceAgentConfig:
@@ -39,6 +41,9 @@ class ReinforceAgentConfig:
     critic_learning_rate: float = 1e-3          # Critic learning rate
     
     max_grad_norm: 1.0                          # global gradient clipping norm
+    
+    critic_loss_type: CriticLossType = "mse"    # "mse" or "huber"
+    huber_delta: float = 1.0                    # delta for Huber loss (if used)
 
 
 
@@ -284,7 +289,7 @@ class ReinforceAgent:
         mode = self.agent_config.baseline_mode
 
         if mode == "off":
-            advantages_list: list[np.ndarray] = [
+            return [
                 r.astype(np.float32) for r in returns_list
             ]
 
@@ -294,53 +299,30 @@ class ReinforceAgent:
                 baseline = float(r.mean())
                 advantages = (r - baseline).astype(np.float32)
                 advantages_list.append(advantages)
+            return advantages_list
 
-        elif mode == "batch":
-            # for CVaR-like weighting
-            all_returns = np.concatenate(returns_list)
-            weights_expanded = []
-            for i, r in enumerate(returns_list):
-                weights_expanded.append(np.full(len(r), episode_rank_weights[i]))
-            weights_flat = np.concatenate(weights_expanded)
-            sum_weights = np.sum(weights_flat)
-            if sum_weights > 1e-8:
-                baseline = np.sum(weights_flat * all_returns) / sum_weights
-            else:
-                baseline = 0.0
+        all_values = np.concatenate(returns_list)
+        weights_expanded = []
+        for i, r in enumerate(returns_list):
+            w = episode_rank_weights[i]
+            weights_expanded.append(np.full(len(r), w))
 
-            advantages_list = [
-                (r - baseline).astype(np.float32) for r in returns_list
+        all_weights = np.concatenate(weights_expanded)
+        
+        mean, std = self._compute_weighted_stats(all_values, all_weights)
+        
+        if mode == "batch":
+            return [
+                (r - mean).astype(np.float32) for r in returns_list
             ]
-
         elif mode == "batch_norm":
-            all_returns = np.concatenate(returns_list)
-            
-            weights_expanded = []
-            for i, r in enumerate(returns_list):
-                weights_expanded.append(np.full(len(r), episode_rank_weights[i]))
-            weights_flat = np.concatenate(weights_expanded)
-            # Weighted Mean = Sum(W * R) / Sum(W)
-            sum_weights = np.sum(weights_flat)
-            if sum_weights > 1e-8:
-                mean = np.sum(weights_flat * all_returns) / sum_weights
-                # Weighted Variance = Sum(W * (R - mean)^2) / Sum(W)
-                var = np.sum(weights_flat * (all_returns - mean)**2) / sum_weights
-                std = np.sqrt(var)
-            else:
-                mean = 0.0
-                std = 1.0
-                
-            eps = 1e-8
-            if std < eps: std = eps
-            
-            advantages_list = [
-                ((r - mean) / std).astype(np.float32)
-                for r in returns_list
+            if std < 1e-8:
+                std = 1e-8
+            return [
+                ((r - mean) / std).astype(np.float32) for r in returns_list
             ]
         else:
-            raise ValueError(f"Unknown baseline mode: {mode}") 
-        
-        return advantages_list
+            raise ValueError(f"Unknown baseline mode: {mode}")
 
 
     def _policy_gradient_step(
@@ -467,7 +449,7 @@ class ReinforceAgent:
                 # compute critic gradients
                 # loos = 0.5 * (v_curr - td_targets)^2
                 # dloss / dv_logits = v_curr - td_targets
-                grad_logits_c = (v_curr - td_targets).astype(np.float32).reshape(-1, 1)
+                grad_logits_c = self._get_grad_logits_critic(v_curr, td_targets)
                 
                 # backpropagate through time for critic
                 for t in range(T):
@@ -877,3 +859,52 @@ class ReinforceAgent:
             )
                 
         return total_norm   # return original norm for logging purposes
+    
+    
+    def _compute_weighted_stats(
+        self, 
+        values: np.ndarray, 
+        weights: np.ndarray
+    ) -> tuple[float, float]:
+        """
+        Helper to compute weighted mean and std.
+        Returns (mean, std).
+        """
+        sum_weights = np.sum(weights)
+        if sum_weights < 1e-8:
+            return 0.0, 1.0
+        
+        mean = np.sum(values * weights) / sum_weights
+        var = np.sum(weights * (values - mean)**2) / sum_weights
+        std = np.sqrt(var)
+        
+        return mean, std
+    
+    
+    def _get_grad_logits_critic(self, v_curr: np.ndarray, td_targets: np.ndarray) -> np.ndarray:
+        """
+        Compute gradient of critic logits
+        """
+        diff = v_curr - td_targets
+        
+        if self.agent_config.critic_loss_type == "mse":
+            # loss = 0.5 * (v_curr - td_targets)^2
+            # dloss / dv_logits = v_curr - td_targets
+            grad_logits_c = diff.astype(np.float32).reshape(-1, 1)
+        elif self.agent_config.critic_loss_type == "huber":
+            # Huber loss
+            delta = self.agent_config.huber_delta
+            abs_diff = np.abs(diff)
+            
+            # Gradients:
+            # if |x| <= delta: x
+            # if |x| > delta:  delta * sign(x)
+            grad_logits_c = np.where(
+                abs_diff <= delta,
+                diff,
+                delta * np.sign(diff)
+            ).astype(np.float32).reshape(-1, 1)
+        else:
+            raise ValueError(f"Unknown critic loss type: {self.agent_config.critic_loss_type}")
+
+        return grad_logits_c
